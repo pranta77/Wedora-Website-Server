@@ -12,13 +12,13 @@ app.use(cors());
 app.use(express.json());
 
 // MongoDB connection
-// const client = new MongoClient(process.env.MONGODB_URI);
+const client = new MongoClient(process.env.MONGODB_URI);
 
 try {
-//   await client.connect();
-//   console.log("Successfully connected to MongoDB!");
+  await client.connect();
+  console.log("Successfully connected to MongoDB!");
 
-//   const db = client.db("Wedora-DB");
+  const db = client.db("Wedora-DB");
 
   // Collections
   const usersCollection = db.collection("users");
