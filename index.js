@@ -1,4 +1,3 @@
-
 import cors from "cors";
 import express from "express";
 import "dotenv/config";
@@ -26,6 +25,33 @@ try {
   const bookingsCollection = db.collection("bookings");
   const transactionsCollection = db.collection("transactions");
 
+  
+// Get all approved and active services
+app.get("/services", async (req, res) => {
+  try {
+    const services = await servicesCollection
+      .find({
+        status: "approved",
+        isActive: true,
+      })
+      .sort({ createdAt: -1 })
+      .toArray();
+
+    res.status(200).send({
+      success: true,
+      services,
+    });
+  } catch (error) {
+    console.error("Failed to fetch services:", error);
+
+    res.status(500).send({
+      success: false,
+      message: "Failed to fetch services",
+    });
+  }
+});
+
+
   // Root route
   app.get("/", (req, res) => {
     res.send("Hello Wedora Server");
@@ -35,7 +61,6 @@ try {
   app.listen(PORT, () => {
     console.log(`Wedora server listening on port ${PORT}`);
   });
-
 } catch (error) {
   console.error("MongoDB connection failed:", error);
   process.exit(1);
