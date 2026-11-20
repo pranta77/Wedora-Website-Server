@@ -456,6 +456,93 @@ app.patch("/customer/bookings/:id/cancel", verifyUser, async (req, res) => {
       });
     }
   });
+
+// Get Vendor Profile
+app.get("/vendor/profile", verifyUser, verifyVendor, async (req, res) => {
+  try {
+    const vendor = await usersCollection.findOne(
+      { _id: req.user.id },
+      {
+        projection: {
+          name: 1,
+          email: 1,
+          image: 1,
+          role: 1,
+          phone: 1,
+          location: 1,
+          bio: 1,
+        },
+      }
+    );
+
+    if (!vendor) {
+      return res.status(404).send({
+        success: false,
+        message: "Vendor profile not found.",
+      });
+    }
+
+    res.status(200).send({
+      success: true,
+      vendor,
+    });
+  } catch (error) {
+    console.error("Failed to load vendor profile:", error);
+
+    res.status(500).send({
+      success: false,
+      message: "Failed to load vendor profile.",
+    });
+  }
+});
+
+// Update Vendor Profile
+app.patch("/vendor/profile", verifyUser, verifyVendor, async (req, res) => {
+  try {
+    const { name, image, phone, location, bio } = req.body;
+
+    if (!name?.trim()) {
+      return res.status(400).send({
+        success: false,
+        message: "Name is required.",
+      });
+    }
+
+    const result = await usersCollection.updateOne(
+      { _id: req.user.id },
+      {
+        $set: {
+          name: name.trim(),
+          image: image?.trim() || "",
+          phone: phone?.trim() || "",
+          location: location?.trim() || "",
+          bio: bio?.trim() || "",
+          updatedAt: new Date(),
+        },
+      }
+    );
+
+    if (result.matchedCount === 0) {
+      return res.status(404).send({
+        success: false,
+        message: "Vendor not found.",
+      });
+    }
+
+    res.status(200).send({
+      success: true,
+      message: "Profile updated successfully!",
+    });
+  } catch (error) {
+    console.error("Failed to update vendor profile:", error);
+
+    res.status(500).send({
+      success: false,
+      message: "Failed to update profile.",
+    });
+  }
+});
+
   // Update Vendor Service
 app.patch("/vendor/services/:id", verifyUser, verifyVendor, async (req, res) => {
   try {
