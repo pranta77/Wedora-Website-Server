@@ -422,6 +422,65 @@ app.get("/vendor/bookings", verifyUser, verifyVendor, async (req, res) => {
     });
   }
 });
+// Update Vendor Booking Status
+app.patch(
+  "/vendor/bookings/:id/status",
+  verifyUser,
+  verifyVendor,
+  async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { status } = req.body;
+
+      if (!ObjectId.isValid(id)) {
+        return res.status(400).send({
+          success: false,
+          message: "Invalid booking ID.",
+        });
+      }
+
+      if (!["accepted", "rejected"].includes(status)) {
+        return res.status(400).send({
+          success: false,
+          message: "Invalid booking status.",
+        });
+      }
+
+      const result = await bookingsCollection.updateOne(
+        {
+          _id: new ObjectId(id),
+          vendorId: req.user.id,
+          status: "pending",
+        },
+        {
+          $set: {
+            status,
+            updatedAt: new Date(),
+          },
+        }
+      );
+
+      if (result.matchedCount === 0) {
+        return res.status(404).send({
+          success: false,
+          message: "Pending booking not found.",
+        });
+      }
+
+      res.status(200).send({
+        success: true,
+        message: `Booking ${status} successfully!`,
+      });
+    } catch (error) {
+      console.error("Failed to update booking:", error);
+
+      res.status(500).send({
+        success: false,
+        message: "Failed to update booking status.",
+      });
+    }
+  }
+);
   // Get all services for admin
   app.get("/admin/services", verifyUser, verifyAdmin, async (req, res) => {
     try {
