@@ -401,6 +401,27 @@ app.get("/customer/bookings", verifyUser, async (req, res) => {
       });
     }
   });
+  // Get Vendor Bookings
+app.get("/vendor/bookings", verifyUser, verifyVendor, async (req, res) => {
+  try {
+    const bookings = await bookingsCollection
+      .find({ vendorId: req.user.id })
+      .sort({ createdAt: -1 })
+      .toArray();
+
+    res.status(200).send({
+      success: true,
+      bookings,
+    });
+  } catch (error) {
+    console.error("Failed to fetch vendor bookings:", error);
+
+    res.status(500).send({
+      success: false,
+      message: "Failed to fetch bookings.",
+    });
+  }
+});
   // Get all services for admin
   app.get("/admin/services", verifyUser, verifyAdmin, async (req, res) => {
     try {
