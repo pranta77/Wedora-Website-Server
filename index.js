@@ -318,65 +318,65 @@ app.get("/admin/users", verifyUser, verifyAdmin, async (req, res) => {
   }
 });
 // Block or Unblock User (Admin Only)
-// app.patch(
-//   "/admin/users/:id/status",
-//   verifyUser,
-//   verifyAdmin,
-//   async (req, res) => {
-//     try {
-//       const { id } = req.params;
-//       const { isBlocked } = req.body;
+app.patch(
+  "/admin/users/:id/status",
+  verifyUser,
+  verifyAdmin,
+  async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { isBlocked } = req.body;
 
-//       if (!ObjectId.isValid(id)) {
-//         return res.status(400).send({
-//           success: false,
-//           message: "Invalid user ID.",
-//         });
-//       }
+      if (!ObjectId.isValid(id)) {
+        return res.status(400).send({
+          success: false,
+          message: "Invalid user ID.",
+        });
+      }
 
-//       if (typeof isBlocked !== "boolean") {
-//         return res.status(400).send({
-//           success: false,
-//           message: "Invalid account status.",
-//         });
-//       }
+      if (typeof isBlocked !== "boolean") {
+        return res.status(400).send({
+          success: false,
+          message: "Invalid account status.",
+        });
+      }
 
-//       const result = await usersCollection.updateOne(
-//         {
-//           _id: new ObjectId(id),
-//           role: { $in: ["customer", "vendor"] },
-//         },
-//         {
-//           $set: {
-//             isBlocked,
-//             updatedAt: new Date(),
-//           },
-//         }
-//       );
+      const result = await usersCollection.updateOne(
+        {
+          _id: new ObjectId(id),
+          role: { $in: ["customer", "vendor"] },
+        },
+        {
+          $set: {
+            isBlocked,
+            updatedAt: new Date(),
+          },
+        }
+      );
 
-//       if (result.matchedCount === 0) {
-//         return res.status(404).send({
-//           success: false,
-//           message: "Customer or vendor not found.",
-//         });
-//       }
+      if (result.matchedCount === 0) {
+        return res.status(404).send({
+          success: false,
+          message: "Customer or vendor not found.",
+        });
+      }
 
-//       res.status(200).send({
-//         success: true,
-//         message: isBlocked
-//           ? "User blocked successfully."
-//           : "User unblocked successfully.",
-//       });
-//     } catch (error) {
-//       console.error("Failed to update user status:", error);
+      res.status(200).send({
+        success: true,
+        message: isBlocked
+          ? "User blocked successfully."
+          : "User unblocked successfully.",
+      });
+    } catch (error) {
+      console.error("Failed to update user status:", error);
 
-//       res.status(500).send({
-//         success: false,
-//         message: "Failed to update user status.",
-//       });
-//     }
-//   }
-// );
+      res.status(500).send({
+        success: false,
+        message: "Failed to update user status.",
+      });
+    }
+  }
+);
   // Approve or reject a service
 app.patch(
   "/admin/services/:id/status",
