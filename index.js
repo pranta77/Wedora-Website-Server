@@ -243,26 +243,26 @@ try {
     }
   });
   // Get services belonging to the logged-in vendor
-  // app.get("/vendor/services", verifyUser, verifyVendor, async (req, res) => {
-  //   try {
-  //     const services = await servicesCollection
-  //       .find({ vendorId: req.user.id })
-  //       .sort({ createdAt: -1 })
-  //       .toArray();
+  app.get("/vendor/services", verifyUser, verifyVendor, async (req, res) => {
+    try {
+      const services = await servicesCollection
+        .find({ vendorId: req.user.id })
+        .sort({ createdAt: -1 })
+        .toArray();
 
-  //     res.status(200).send({
-  //       success: true,
-  //       services,
-  //     });
-  //   } catch (error) {
-  //     console.error("Failed to fetch vendor services:", error);
+      res.status(200).send({
+        success: true,
+        services,
+      });
+    } catch (error) {
+      console.error("Failed to fetch vendor services:", error);
 
-  //     res.status(500).send({
-  //       success: false,
-  //       message: "Failed to fetch your services.",
-  //     });
-  //   }
-  // });
+      res.status(500).send({
+        success: false,
+        message: "Failed to fetch your services.",
+      });
+    }
+  });
   // Get all services for admin
   // app.get("/admin/services", verifyUser, verifyAdmin, async (req, res) => {
   //   try {
