@@ -456,6 +456,65 @@ app.patch("/customer/bookings/:id/cancel", verifyUser, async (req, res) => {
       });
     }
   });
+  // Update Vendor Service
+app.patch("/vendor/services/:id", verifyUser, verifyVendor, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { serviceName, category, description, price, location, images } = req.body;
+
+    if (!ObjectId.isValid(id)) {
+      return res.status(400).send({
+        success: false,
+        message: "Invalid service ID.",
+      });
+    }
+
+    if (!serviceName || !category || !description || !price || !location || !images) {
+      return res.status(400).send({
+        success: false,
+        message: "Please provide all required fields.",
+      });
+    }
+
+    const result = await servicesCollection.updateOne(
+      {
+        _id: new ObjectId(id),
+        vendorId: req.user.id,
+      },
+      {
+        $set: {
+          serviceName,
+          category,
+          description,
+          price: Number(price),
+          location,
+          images: [images],
+          status: "pending",
+          updatedAt: new Date(),
+        },
+      }
+    );
+
+    if (result.matchedCount === 0) {
+      return res.status(404).send({
+        success: false,
+        message: "Service not found.",
+      });
+    }
+
+    res.status(200).send({
+      success: true,
+      message: "Service updated successfully! It is pending admin approval.",
+    });
+  } catch (error) {
+    console.error("Failed to update service:", error);
+
+    res.status(500).send({
+      success: false,
+      message: "Failed to update service.",
+    });
+  }
+});
   // Get Vendor Bookings
 app.get("/vendor/bookings", verifyUser, verifyVendor, async (req, res) => {
   try {
@@ -749,6 +808,50 @@ app.patch(
       }
     },
   );
+
+// Delete Vendor Service
+app.delete(
+  "/vendor/services/:id",
+  verifyUser,
+  verifyVendor,
+  async (req, res) => {
+    try {
+      const { id } = req.params;
+
+      if (!ObjectId.isValid(id)) {
+        return res.status(400).send({
+          success: false,
+          message: "Invalid service ID.",
+        });
+      }
+
+      const result = await servicesCollection.deleteOne({
+        _id: new ObjectId(id),
+        vendorId: req.user.id,
+      });
+
+      if (result.deletedCount === 0) {
+        return res.status(404).send({
+          success: false,
+          message: "Service not found.",
+        });
+      }
+
+      res.status(200).send({
+        success: true,
+        message: "Service deleted successfully.",
+      });
+    } catch (error) {
+      console.error("Failed to delete vendor service:", error);
+
+      res.status(500).send({
+        success: false,
+        message: "Failed to delete service.",
+      });
+    }
+  }
+);
+
   // Get all approved and active services
   app.get("/services", async (req, res) => {
     try {
