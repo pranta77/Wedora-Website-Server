@@ -436,46 +436,46 @@ app.patch(
   }
 );
 // Delete a service (Admin only)
-// app.delete(
-//   "/admin/services/:id",
-//   verifyUser,
-//   verifyAdmin,
-//   async (req, res) => {
-//     try {
-//       const { id } = req.params;
+app.delete(
+  "/admin/services/:id",
+  verifyUser,
+  verifyAdmin,
+  async (req, res) => {
+    try {
+      const { id } = req.params;
 
-//       if (!ObjectId.isValid(id)) {
-//         return res.status(400).send({
-//           success: false,
-//           message: "Invalid service ID.",
-//         });
-//       }
+      if (!ObjectId.isValid(id)) {
+        return res.status(400).send({
+          success: false,
+          message: "Invalid service ID.",
+        });
+      }
 
-//       const result = await servicesCollection.deleteOne({
-//         _id: new ObjectId(id),
-//       });
+      const result = await servicesCollection.deleteOne({
+        _id: new ObjectId(id),
+      });
 
-//       if (result.deletedCount === 0) {
-//         return res.status(404).send({
-//           success: false,
-//           message: "Service not found.",
-//         });
-//       }
+      if (result.deletedCount === 0) {
+        return res.status(404).send({
+          success: false,
+          message: "Service not found.",
+        });
+      }
 
-//       res.status(200).send({
-//         success: true,
-//         message: "Service deleted successfully.",
-//       });
-//     } catch (error) {
-//       console.error("Failed to delete service:", error);
+      res.status(200).send({
+        success: true,
+        message: "Service deleted successfully.",
+      });
+    } catch (error) {
+      console.error("Failed to delete service:", error);
 
-//       res.status(500).send({
-//         success: false,
-//         message: "Failed to delete service.",
-//       });
-//     }
-//   }
-// );
+      res.status(500).send({
+        success: false,
+        message: "Failed to delete service.",
+      });
+    }
+  }
+);
   // Get all approved and active services
   app.get("/services", async (req, res) => {
     try {
