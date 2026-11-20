@@ -186,62 +186,62 @@ try {
     }
   });
   // Add a new wedding service
-  // app.post("/services", verifyUser, verifyVendor, async (req, res) => {
-  //   try {
-  //     const { serviceName, category, description, price, location, images } =
-  //       req.body;
+  app.post("/services", verifyUser, verifyVendor, async (req, res) => {
+    try {
+      const { serviceName, category, description, price, location, images } =
+        req.body;
 
-  //     if (
-  //       !serviceName ||
-  //       !category ||
-  //       !description ||
-  //       !price ||
-  //       !location ||
-  //       !images
-  //     ) {
-  //       return res.status(400).send({
-  //         success: false,
-  //         message: "Please provide all required fields.",
-  //       });
-  //     }
+      if (
+        !serviceName ||
+        !category ||
+        !description ||
+        !price ||
+        !location ||
+        !images
+      ) {
+        return res.status(400).send({
+          success: false,
+          message: "Please provide all required fields.",
+        });
+      }
 
-  //     if (Number(price) <= 0 || !Number.isFinite(Number(price))) {
-  //       return res.status(400).send({
-  //         success: false,
-  //         message: "Please provide a valid price.",
-  //       });
-  //     }
+      if (Number(price) <= 0 || !Number.isFinite(Number(price))) {
+        return res.status(400).send({
+          success: false,
+          message: "Please provide a valid price.",
+        });
+      }
 
-  //     const newService = {
-  //       vendorId: req.user.id,
-  //       vendorName: req.user.name,
-  //       serviceName,
-  //       category,
-  //       description,
-  //       price: Number(price),
-  //       location,
-  //       images: [images],
-  //       status: "pending",
-  //       isActive: true,
-  //       createdAt: new Date(),
-  //     };
+      const newService = {
+        vendorId: req.user.id,
+        vendorName: req.user.name,
+        serviceName,
+        category,
+        description,
+        price: Number(price),
+        location,
+        images: [images],
+        status: "pending",
+        isActive: true,
+        createdAt: new Date(),
+      };
 
-  //     const result = await servicesCollection.insertOne(newService);
+      const result = await servicesCollection.insertOne(newService);
 
-  //     res.status(201).send({
-  //       success: true,
-  //       message: "Service submitted for admin approval!",
-  //       insertedId: result.insertedId,
-  //     });
-  //   } catch (error) {
-  //     console.error("Failed to add service:", error);
+      res.status(201).send({
+        success: true,
+        message: "Service submitted for admin approval!",
+        insertedId: result.insertedId,
+      });
+    } catch (error) {
+      console.error("Failed to add service:", error);
 
-  //     res.status(500).send({
-  //       success: false,
-  //       message: "Failed to add service.",
-  //     });
-  //   }
-  // });
+      res.status(500).send({
+        success: false,
+        message: "Failed to add service.",
+      });
+    }
+  });
   // Get services belonging to the logged-in vendor
   // app.get("/vendor/services", verifyUser, verifyVendor, async (req, res) => {
   //   try {
