@@ -160,6 +160,116 @@ try {
 
     next();
   };
+  // Create Booking (Customer Only)
+  app.post("/bookings", verifyUser, async (req, res) => {
+    try {
+      const { serviceId, eventDate, eventLocation, message } = req.body;
+
+      if (req.user.role !== "customer") {
+        return res.status(403).send({
+          success: false,
+          message: "Only customers can book services.",
+        });
+      }
+
+      if (!ObjectId.isValid(serviceId)) {
+        return res.status(400).send({
+          success: false,
+          message: "Invalid service ID.",
+        });
+      }
+
+      if (!eventDate || !eventLocation?.trim()) {
+        return res.status(400).send({
+          success: false,
+          message: "Event date and location are required.",
+        });
+      }
+
+      const datePattern = /^\d{4}-\d{2}-\d{2}$/;
+
+      if (!datePattern.test(eventDate)) {
+        return res.status(400).send({
+          success: false,
+          message: "Invalid event date.",
+        });
+      }
+
+      const selectedDate = new Date(`${eventDate}T00:00:00.000Z`);
+
+      if (
+        Number.isNaN(selectedDate.getTime()) ||
+        selectedDate.toISOString().slice(0, 10) !== eventDate
+      ) {
+        return res.status(400).send({
+          success: false,
+          message: "Invalid event date.",
+        });
+      }
+
+      const today = new Date().toLocaleDateString("en-CA", {
+        timeZone: "Asia/Dhaka",
+      });
+
+      if (eventDate < today) {
+        return res.status(400).send({
+          success: false,
+          message: "Event date cannot be in the past.",
+        });
+      }
+
+      const service = await servicesCollection.findOne({
+        _id: new ObjectId(serviceId),
+        status: "approved",
+        isActive: true,
+      });
+
+      if (!service) {
+        return res.status(404).send({
+          success: false,
+          message: "This service is currently unavailable.",
+        });
+      }
+
+      if (service.vendorId === req.user.id) {
+        return res.status(400).send({
+          success: false,
+          message: "You cannot book your own service.",
+        });
+      }
+
+      const newBooking = {
+        serviceId: service._id,
+        serviceName: service.serviceName,
+        vendorId: service.vendorId,
+        vendorName: service.vendorName,
+        customerId: req.user.id,
+        customerName: req.user.name,
+        customerEmail: req.user.email,
+        eventDate,
+        eventLocation: eventLocation.trim(),
+        message: message?.trim() || "",
+        price: Number(service.price),
+        status: "pending",
+        createdAt: new Date(),
+      };
+
+      const result = await bookingsCollection.insertOne(newBooking);
+
+      res.status(201).send({
+        success: true,
+        message: "Booking request submitted successfully!",
+        bookingId: result.insertedId,
+      });
+    } catch (error) {
+      console.error("Failed to create booking:", error);
+
+      res.status(500).send({
+        success: false,
+        message: "Failed to submit booking request.",
+      });
+    }
+  });
   // Get featured services
   app.get("/services/featured", async (req, res) => {
     try {
@@ -284,198 +394,198 @@ try {
       });
     }
   });
-// Get All Users (Admin Only)
-app.get("/admin/users", verifyUser, verifyAdmin, async (req, res) => {
-  try {
-    const users = await usersCollection
-      .find(
-        {},
-        {
-          projection: {
-            name: 1,
-            email: 1,
-            image: 1,
-            role: 1,
-            isBlocked: 1,
-            createdAt: 1,
-          },
-        }
-      )
-      .sort({ createdAt: -1 })
-      .toArray();
-
-    res.status(200).send({
-      success: true,
-      users,
-    });
-  } catch (error) {
-    console.error("Failed to fetch users:", error);
-
-    res.status(500).send({
-      success: false,
-      message: "Failed to load users.",
-    });
-  }
-});
-// Block or Unblock User (Admin Only)
-app.patch(
-  "/admin/users/:id/status",
-  verifyUser,
-  verifyAdmin,
-  async (req, res) => {
+  // Get All Users (Admin Only)
+  app.get("/admin/users", verifyUser, verifyAdmin, async (req, res) => {
     try {
-      const { id } = req.params;
-      const { isBlocked } = req.body;
-
-      if (!ObjectId.isValid(id)) {
-        return res.status(400).send({
-          success: false,
-          message: "Invalid user ID.",
-        });
-      }
-
-      if (typeof isBlocked !== "boolean") {
-        return res.status(400).send({
-          success: false,
-          message: "Invalid account status.",
-        });
-      }
-
-      const result = await usersCollection.updateOne(
-        {
-          _id: new ObjectId(id),
-          role: { $in: ["customer", "vendor"] },
-        },
-        {
-          $set: {
-            isBlocked,
-            updatedAt: new Date(),
+      const users = await usersCollection
+        .find(
+          {},
+          {
+            projection: {
+              name: 1,
+              email: 1,
+              image: 1,
+              role: 1,
+              isBlocked: 1,
+              createdAt: 1,
+            },
           },
-        }
-      );
-
-      if (result.matchedCount === 0) {
-        return res.status(404).send({
-          success: false,
-          message: "Customer or vendor not found.",
-        });
-      }
+        )
+        .sort({ createdAt: -1 })
+        .toArray();
 
       res.status(200).send({
         success: true,
-        message: isBlocked
-          ? "User blocked successfully."
-          : "User unblocked successfully.",
+        users,
       });
     } catch (error) {
-      console.error("Failed to update user status:", error);
+      console.error("Failed to fetch users:", error);
 
       res.status(500).send({
         success: false,
-        message: "Failed to update user status.",
+        message: "Failed to load users.",
       });
     }
-  }
-);
+  });
+  // Block or Unblock User (Admin Only)
+  app.patch(
+    "/admin/users/:id/status",
+    verifyUser,
+    verifyAdmin,
+    async (req, res) => {
+      try {
+        const { id } = req.params;
+        const { isBlocked } = req.body;
+
+        if (!ObjectId.isValid(id)) {
+          return res.status(400).send({
+            success: false,
+            message: "Invalid user ID.",
+          });
+        }
+
+        if (typeof isBlocked !== "boolean") {
+          return res.status(400).send({
+            success: false,
+            message: "Invalid account status.",
+          });
+        }
+
+        const result = await usersCollection.updateOne(
+          {
+            _id: new ObjectId(id),
+            role: { $in: ["customer", "vendor"] },
+          },
+          {
+            $set: {
+              isBlocked,
+              updatedAt: new Date(),
+            },
+          },
+        );
+
+        if (result.matchedCount === 0) {
+          return res.status(404).send({
+            success: false,
+            message: "Customer or vendor not found.",
+          });
+        }
+
+        res.status(200).send({
+          success: true,
+          message: isBlocked
+            ? "User blocked successfully."
+            : "User unblocked successfully.",
+        });
+      } catch (error) {
+        console.error("Failed to update user status:", error);
+
+        res.status(500).send({
+          success: false,
+          message: "Failed to update user status.",
+        });
+      }
+    },
+  );
   // Approve or reject a service
-app.patch(
-  "/admin/services/:id/status",
-  verifyUser,
-  verifyAdmin,
-  async (req, res) => {
-    try {
-      const { id } = req.params;
-      const { status } = req.body;
+  app.patch(
+    "/admin/services/:id/status",
+    verifyUser,
+    verifyAdmin,
+    async (req, res) => {
+      try {
+        const { id } = req.params;
+        const { status } = req.body;
 
-      if (!ObjectId.isValid(id)) {
-        return res.status(400).send({
-          success: false,
-          message: "Invalid service ID.",
-        });
-      }
-
-      if (!["approved", "rejected"].includes(status)) {
-        return res.status(400).send({
-          success: false,
-          message: "Invalid service status.",
-        });
-      }
-
-      const result = await servicesCollection.updateOne(
-        {
-          _id: new ObjectId(id),
-          status: "pending",
-        },
-        {
-          $set: {
-            status,
-            updatedAt: new Date(),
-          },
+        if (!ObjectId.isValid(id)) {
+          return res.status(400).send({
+            success: false,
+            message: "Invalid service ID.",
+          });
         }
-      );
 
-      if (result.matchedCount === 0) {
-        return res.status(404).send({
+        if (!["approved", "rejected"].includes(status)) {
+          return res.status(400).send({
+            success: false,
+            message: "Invalid service status.",
+          });
+        }
+
+        const result = await servicesCollection.updateOne(
+          {
+            _id: new ObjectId(id),
+            status: "pending",
+          },
+          {
+            $set: {
+              status,
+              updatedAt: new Date(),
+            },
+          },
+        );
+
+        if (result.matchedCount === 0) {
+          return res.status(404).send({
+            success: false,
+            message: "Pending service not found.",
+          });
+        }
+
+        res.status(200).send({
+          success: true,
+          message: `Service ${status} successfully.`,
+        });
+      } catch (error) {
+        console.error("Failed to update service status:", error);
+
+        res.status(500).send({
           success: false,
-          message: "Pending service not found.",
+          message: "Failed to update service status.",
         });
       }
+    },
+  );
+  // Delete a service (Admin only)
+  app.delete(
+    "/admin/services/:id",
+    verifyUser,
+    verifyAdmin,
+    async (req, res) => {
+      try {
+        const { id } = req.params;
 
-      res.status(200).send({
-        success: true,
-        message: `Service ${status} successfully.`,
-      });
-    } catch (error) {
-      console.error("Failed to update service status:", error);
+        if (!ObjectId.isValid(id)) {
+          return res.status(400).send({
+            success: false,
+            message: "Invalid service ID.",
+          });
+        }
 
-      res.status(500).send({
-        success: false,
-        message: "Failed to update service status.",
-      });
-    }
-  }
-);
-// Delete a service (Admin only)
-app.delete(
-  "/admin/services/:id",
-  verifyUser,
-  verifyAdmin,
-  async (req, res) => {
-    try {
-      const { id } = req.params;
+        const result = await servicesCollection.deleteOne({
+          _id: new ObjectId(id),
+        });
 
-      if (!ObjectId.isValid(id)) {
-        return res.status(400).send({
+        if (result.deletedCount === 0) {
+          return res.status(404).send({
+            success: false,
+            message: "Service not found.",
+          });
+        }
+
+        res.status(200).send({
+          success: true,
+          message: "Service deleted successfully.",
+        });
+      } catch (error) {
+        console.error("Failed to delete service:", error);
+
+        res.status(500).send({
           success: false,
-          message: "Invalid service ID.",
+          message: "Failed to delete service.",
         });
       }
-
-      const result = await servicesCollection.deleteOne({
-        _id: new ObjectId(id),
-      });
-
-      if (result.deletedCount === 0) {
-        return res.status(404).send({
-          success: false,
-          message: "Service not found.",
-        });
-      }
-
-      res.status(200).send({
-        success: true,
-        message: "Service deleted successfully.",
-      });
-    } catch (error) {
-      console.error("Failed to delete service:", error);
-
-      res.status(500).send({
-        success: false,
-        message: "Failed to delete service.",
-      });
-    }
-  }
-);
+    },
+  );
   // Get all approved and active services
   app.get("/services", async (req, res) => {
     try {
@@ -497,6 +607,44 @@ app.delete(
       res.status(500).send({
         success: false,
         message: "Failed to fetch services",
+      });
+    }
+  });
+  // Get Single Service Details
+  app.get("/services/:id", async (req, res) => {
+    try {
+      const { id } = req.params;
+
+      if (!ObjectId.isValid(id)) {
+        return res.status(400).send({
+          success: false,
+          message: "Invalid service ID.",
+        });
+      }
+
+      const service = await servicesCollection.findOne({
+        _id: new ObjectId(id),
+        status: "approved",
+        isActive: true,
+      });
+
+      if (!service) {
+        return res.status(404).send({
+          success: false,
+          message: "Service not found.",
+        });
+      }
+
+      res.status(200).send({
+        success: true,
+        service,
+      });
+    } catch (error) {
+      console.error("Failed to fetch service:", error);
+
+      res.status(500).send({
+        success: false,
+        message: "Failed to fetch service details.",
       });
     }
   });
