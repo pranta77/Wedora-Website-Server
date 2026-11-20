@@ -298,6 +298,61 @@ app.get("/customer/bookings", verifyUser, async (req, res) => {
     });
   }
 });
+
+// Cancel Customer Booking
+app.patch("/customer/bookings/:id/cancel", verifyUser, async (req, res) => {
+  try {
+    if (req.user.role !== "customer") {
+      return res.status(403).send({
+        success: false,
+        message: "Only customers can cancel bookings.",
+      });
+    }
+
+    const { id } = req.params;
+
+    if (!ObjectId.isValid(id)) {
+      return res.status(400).send({
+        success: false,
+        message: "Invalid booking ID.",
+      });
+    }
+
+    const result = await bookingsCollection.updateOne(
+      {
+        _id: new ObjectId(id),
+        customerId: req.user.id,
+        status: "pending",
+      },
+      {
+        $set: {
+          status: "cancelled",
+          updatedAt: new Date(),
+        },
+      }
+    );
+
+    if (result.matchedCount === 0) {
+      return res.status(404).send({
+        success: false,
+        message: "Pending booking not found or already processed.",
+      });
+    }
+
+    res.status(200).send({
+      success: true,
+      message: "Booking cancelled successfully!",
+    });
+  } catch (error) {
+    console.error("Failed to cancel booking:", error);
+
+    res.status(500).send({
+      success: false,
+      message: "Failed to cancel booking.",
+    });
+  }
+});
+
   // Get featured services
   app.get("/services/featured", async (req, res) => {
     try {
