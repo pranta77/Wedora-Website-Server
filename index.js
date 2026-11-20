@@ -378,63 +378,63 @@ app.get("/admin/users", verifyUser, verifyAdmin, async (req, res) => {
 //   }
 // );
   // Approve or reject a service
-// app.patch(
-//   "/admin/services/:id/status",
-//   verifyUser,
-//   verifyAdmin,
-//   async (req, res) => {
-//     try {
-//       const { id } = req.params;
-//       const { status } = req.body;
+app.patch(
+  "/admin/services/:id/status",
+  verifyUser,
+  verifyAdmin,
+  async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { status } = req.body;
 
-//       if (!ObjectId.isValid(id)) {
-//         return res.status(400).send({
-//           success: false,
-//           message: "Invalid service ID.",
-//         });
-//       }
+      if (!ObjectId.isValid(id)) {
+        return res.status(400).send({
+          success: false,
+          message: "Invalid service ID.",
+        });
+      }
 
-//       if (!["approved", "rejected"].includes(status)) {
-//         return res.status(400).send({
-//           success: false,
-//           message: "Invalid service status.",
-//         });
-//       }
+      if (!["approved", "rejected"].includes(status)) {
+        return res.status(400).send({
+          success: false,
+          message: "Invalid service status.",
+        });
+      }
 
-//       const result = await servicesCollection.updateOne(
-//         {
-//           _id: new ObjectId(id),
-//           status: "pending",
-//         },
-//         {
-//           $set: {
-//             status,
-//             updatedAt: new Date(),
-//           },
-//         }
-//       );
+      const result = await servicesCollection.updateOne(
+        {
+          _id: new ObjectId(id),
+          status: "pending",
+        },
+        {
+          $set: {
+            status,
+            updatedAt: new Date(),
+          },
+        }
+      );
 
-//       if (result.matchedCount === 0) {
-//         return res.status(404).send({
-//           success: false,
-//           message: "Pending service not found.",
-//         });
-//       }
+      if (result.matchedCount === 0) {
+        return res.status(404).send({
+          success: false,
+          message: "Pending service not found.",
+        });
+      }
 
-//       res.status(200).send({
-//         success: true,
-//         message: `Service ${status} successfully.`,
-//       });
-//     } catch (error) {
-//       console.error("Failed to update service status:", error);
+      res.status(200).send({
+        success: true,
+        message: `Service ${status} successfully.`,
+      });
+    } catch (error) {
+      console.error("Failed to update service status:", error);
 
-//       res.status(500).send({
-//         success: false,
-//         message: "Failed to update service status.",
-//       });
-//     }
-//   }
-// );
+      res.status(500).send({
+        success: false,
+        message: "Failed to update service status.",
+      });
+    }
+  }
+);
 // Delete a service (Admin only)
 // app.delete(
 //   "/admin/services/:id",
