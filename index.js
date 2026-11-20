@@ -461,7 +461,7 @@ app.patch("/customer/bookings/:id/cancel", verifyUser, async (req, res) => {
 app.get("/vendor/profile", verifyUser, verifyVendor, async (req, res) => {
   try {
     const vendor = await usersCollection.findOne(
-      { _id: req.user.id },
+      { _id: new ObjectId(req.user.id) },
       {
         projection: {
           name: 1,
@@ -509,7 +509,7 @@ app.patch("/vendor/profile", verifyUser, verifyVendor, async (req, res) => {
     }
 
     const result = await usersCollection.updateOne(
-      { _id: req.user.id },
+      { _id: new ObjectId(req.user.id) },
       {
         $set: {
           name: name.trim(),
