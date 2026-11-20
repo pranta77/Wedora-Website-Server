@@ -496,6 +496,63 @@ app.get("/vendor/profile", verifyUser, verifyVendor, async (req, res) => {
   }
 });
 
+// Get Available Subscription Plans
+app.get("/subscription-plans", async (req, res) => {
+  try {
+    const plans = [
+      {
+        id: "basic",
+        name: "Basic",
+        price: 0,
+        duration: "Free forever",
+        features: [
+          "Add up to 2 wedding services",
+          "Manage booking requests",
+          "Basic vendor profile",
+        ],
+      },
+      {
+        id: "standard",
+        name: "Standard",
+        price: 999,
+        duration: "Per month",
+        features: [
+          "Add up to 10 wedding services",
+          "Manage booking requests",
+          "Enhanced vendor profile",
+          "Priority support",
+        ],
+      },
+      {
+        id: "premium",
+        name: "Premium",
+        price: 1999,
+        duration: "Per month",
+        features: [
+          "Unlimited wedding services",
+          "Manage booking requests",
+          "Featured vendor profile",
+          "Priority support",
+          "Premium visibility",
+        ],
+      },
+    ];
+
+    res.status(200).send({
+      success: true,
+      plans,
+    });
+  } catch (error) {
+    console.error("Failed to fetch subscription plans:", error);
+
+    res.status(500).send({
+      success: false,
+      message: "Failed to load subscription plans.",
+    });
+  }
+});
+
+
 // Update Vendor Profile
 app.patch("/vendor/profile", verifyUser, verifyVendor, async (req, res) => {
   try {
@@ -736,6 +793,29 @@ app.patch(
       });
     }
   });
+
+// Get All Platform Transactions
+app.get("/admin/transactions", verifyUser, verifyAdmin, async (req, res) => {
+  try {
+    const transactions = await transactionsCollection
+      .find({})
+      .sort({ createdAt: -1 })
+      .toArray();
+
+    res.status(200).send({
+      success: true,
+      transactions,
+    });
+  } catch (error) {
+    console.error("Failed to fetch transactions:", error);
+
+    res.status(500).send({
+      success: false,
+      message: "Failed to fetch transactions.",
+    });
+  }
+});
+
   // Block or Unblock User (Admin Only)
   app.patch(
     "/admin/users/:id/status",
