@@ -264,26 +264,26 @@ try {
     }
   });
   // Get all services for admin
-  // app.get("/admin/services", verifyUser, verifyAdmin, async (req, res) => {
-  //   try {
-  //     const services = await servicesCollection
-  //       .find({})
-  //       .sort({ createdAt: -1 })
-  //       .toArray();
+  app.get("/admin/services", verifyUser, verifyAdmin, async (req, res) => {
+    try {
+      const services = await servicesCollection
+        .find({})
+        .sort({ createdAt: -1 })
+        .toArray();
 
-  //     res.status(200).send({
-  //       success: true,
-  //       services,
-  //     });
-  //   } catch (error) {
-  //     console.error("Failed to fetch admin services:", error);
+      res.status(200).send({
+        success: true,
+        services,
+      });
+    } catch (error) {
+      console.error("Failed to fetch admin services:", error);
 
-  //     res.status(500).send({
-  //       success: false,
-  //       message: "Failed to fetch services.",
-  //     });
-  //   }
-  // });
+      res.status(500).send({
+        success: false,
+        message: "Failed to fetch services.",
+      });
+    }
+  });
 // Get All Users (Admin Only)
 // app.get("/admin/users", verifyUser, verifyAdmin, async (req, res) => {
 //   try {
