@@ -270,6 +270,34 @@ try {
       });
     }
   });
+  // Get Customer Bookings
+app.get("/customer/bookings", verifyUser, async (req, res) => {
+  try {
+    if (req.user.role !== "customer") {
+      return res.status(403).send({
+        success: false,
+        message: "Only customers can view their bookings.",
+      });
+    }
+
+    const bookings = await bookingsCollection
+      .find({ customerId: req.user.id })
+      .sort({ createdAt: -1 })
+      .toArray();
+
+    res.status(200).send({
+      success: true,
+      bookings,
+    });
+  } catch (error) {
+    console.error("Failed to fetch customer bookings:", error);
+
+    res.status(500).send({
+      success: false,
+      message: "Failed to fetch bookings.",
+    });
+  }
+});
   // Get featured services
   app.get("/services/featured", async (req, res) => {
     try {
