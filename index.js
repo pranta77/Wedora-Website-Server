@@ -285,38 +285,38 @@ try {
     }
   });
 // Get All Users (Admin Only)
-// app.get("/admin/users", verifyUser, verifyAdmin, async (req, res) => {
-//   try {
-//     const users = await usersCollection
-//       .find(
-//         {},
-//         {
-//           projection: {
-//             name: 1,
-//             email: 1,
-//             image: 1,
-//             role: 1,
-//             isBlocked: 1,
-//             createdAt: 1,
-//           },
-//         }
-//       )
-//       .sort({ createdAt: -1 })
-//       .toArray();
+app.get("/admin/users", verifyUser, verifyAdmin, async (req, res) => {
+  try {
+    const users = await usersCollection
+      .find(
+        {},
+        {
+          projection: {
+            name: 1,
+            email: 1,
+            image: 1,
+            role: 1,
+            isBlocked: 1,
+            createdAt: 1,
+          },
+        }
+      )
+      .sort({ createdAt: -1 })
+      .toArray();
 
-//     res.status(200).send({
-//       success: true,
-//       users,
-//     });
-//   } catch (error) {
-//     console.error("Failed to fetch users:", error);
+    res.status(200).send({
+      success: true,
+      users,
+    });
+  } catch (error) {
+    console.error("Failed to fetch users:", error);
 
-//     res.status(500).send({
-//       success: false,
-//       message: "Failed to load users.",
-//     });
-//   }
-// });
+    res.status(500).send({
+      success: false,
+      message: "Failed to load users.",
+    });
+  }
+});
 // Block or Unblock User (Admin Only)
 // app.patch(
 //   "/admin/users/:id/status",
