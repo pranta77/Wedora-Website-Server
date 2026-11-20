@@ -6,7 +6,7 @@ import { MongoClient } from "mongodb";
 
 import { betterAuth } from "better-auth";
 import { mongodbAdapter } from "@better-auth/mongo-adapter";
-import { toNodeHandler } from "better-auth/node";
+import { fromNodeHeaders, toNodeHandler } from "better-auth/node";
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -108,6 +108,76 @@ databaseHooks: {
 
   // Middleware for other API routes
   app.use(express.json());
+  // Verify logged-in user
+// const verifyUser = async (req, res, next) => {
+//   try {
+//     const session = await auth.api.getSession({
+//       headers: fromNodeHeaders(req.headers),
+//     });
+
+//     if (!session?.user) {
+//       return res.status(401).send({
+//         success: false,
+//         message: "Please log in first.",
+//       });
+//     }
+
+//     if (session.user.isBlocked) {
+//       return res.status(403).send({
+//         success: false,
+//         message: "Your account has been blocked.",
+//       });
+//     }
+
+//     req.user = session.user;
+//     next();
+//   } catch (error) {
+//     console.error("Authentication failed:", error);
+
+//     res.status(401).send({
+//       success: false,
+//       message: "Authentication failed.",
+//     });
+//   }
+// };
+
+// Allow vendors only
+// const verifyVendor = (req, res, next) => {
+//   if (req.user.role !== "vendor") {
+//     return res.status(403).send({
+//       success: false,
+//       message: "Only vendors can perform this action.",
+//     });
+//   }
+
+//   next();
+// };
+
+   // Get featured services
+app.get("/services/featured", async (req, res) => {
+  try {
+    const services = await servicesCollection
+      .find({
+        status: "approved",
+        isActive: true,
+      })
+      .sort({ createdAt: -1 })
+      .limit(6)
+      .toArray();
+
+    res.status(200).send({
+      success: true,
+      services,
+    });
+  } catch (error) {
+    console.error("Failed to fetch featured services:", error);
+
+    res.status(500).send({
+      success: false,
+      message: "Failed to fetch featured services",
+    });
+  }
+});
 
   // Get all approved and active services
   app.get("/services", async (req, res) => {
