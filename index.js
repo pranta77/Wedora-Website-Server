@@ -6,9 +6,14 @@ import { MongoClient, ObjectId } from "mongodb";
 import { betterAuth } from "better-auth";
 import { mongodbAdapter } from "@better-auth/mongo-adapter";
 import { fromNodeHeaders, toNodeHandler } from "better-auth/node";
+import Stripe from "stripe";
+// import { createRemoteJWKSet, jwtVerify } from "jose";
+
+
 
 const app = express();
 const PORT = process.env.PORT || 5000;
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
 
 // CORS
 app.use(
@@ -32,6 +37,49 @@ try {
   const servicesCollection = db.collection("services");
   const bookingsCollection = db.collection("bookings");
   const transactionsCollection = db.collection("transactions");
+
+
+  // JWT public key
+// const JWKS = createRemoteJWKSet(
+//   new URL("http://localhost:3000/api/auth/jwks")
+// );
+
+// Verify JWT token
+// const verifyToken = async (req, res, next) => {
+//   const authHeader = req.headers.authorization;
+
+//   if (!authHeader || !authHeader.startsWith("Bearer ")) {
+//     return res.status(401).send({
+//       success: false,
+//       message: "Unauthorized!",
+//     });
+//   }
+
+//   const token = authHeader.split(" ")[1];
+
+//   if (!token) {
+//     return res.status(401).send({
+//       success: false,
+//       message: "Unauthorized!",
+//     });
+//   }
+
+//   try {
+//     const { payload } = await jwtVerify(token, JWKS);
+
+//     req.user = {
+//       id: payload.sub,
+//       email: payload.email,
+//     };
+
+//     next();
+//   } catch (error) {
+//     return res.status(401).send({
+//       success: false,
+//       message: "Invalid or expired token!",
+//     });
+//   }
+// };
 
   // Better Auth configuration
   const auth = betterAuth({
@@ -102,6 +150,9 @@ try {
 
   // Better Auth route (must come before express.json)
   app.all("/api/auth/{*any}", toNodeHandler(auth));
+
+
+
 
   // Middleware for other API routes
   app.use(express.json());
@@ -271,87 +322,87 @@ try {
     }
   });
   // Get Customer Bookings
-app.get("/customer/bookings", verifyUser, async (req, res) => {
-  try {
-    if (req.user.role !== "customer") {
-      return res.status(403).send({
-        success: false,
-        message: "Only customers can view their bookings.",
-      });
-    }
-
-    const bookings = await bookingsCollection
-      .find({ customerId: req.user.id })
-      .sort({ createdAt: -1 })
-      .toArray();
-
-    res.status(200).send({
-      success: true,
-      bookings,
-    });
-  } catch (error) {
-    console.error("Failed to fetch customer bookings:", error);
-
-    res.status(500).send({
-      success: false,
-      message: "Failed to fetch bookings.",
-    });
-  }
-});
-
-// Cancel Customer Booking
-app.patch("/customer/bookings/:id/cancel", verifyUser, async (req, res) => {
-  try {
-    if (req.user.role !== "customer") {
-      return res.status(403).send({
-        success: false,
-        message: "Only customers can cancel bookings.",
-      });
-    }
-
-    const { id } = req.params;
-
-    if (!ObjectId.isValid(id)) {
-      return res.status(400).send({
-        success: false,
-        message: "Invalid booking ID.",
-      });
-    }
-
-    const result = await bookingsCollection.updateOne(
-      {
-        _id: new ObjectId(id),
-        customerId: req.user.id,
-        status: "pending",
-      },
-      {
-        $set: {
-          status: "cancelled",
-          updatedAt: new Date(),
-        },
+  app.get("/customer/bookings", verifyUser, async (req, res) => {
+    try {
+      if (req.user.role !== "customer") {
+        return res.status(403).send({
+          success: false,
+          message: "Only customers can view their bookings.",
+        });
       }
-    );
 
-    if (result.matchedCount === 0) {
-      return res.status(404).send({
+      const bookings = await bookingsCollection
+        .find({ customerId: req.user.id })
+        .sort({ createdAt: -1 })
+        .toArray();
+
+      res.status(200).send({
+        success: true,
+        bookings,
+      });
+    } catch (error) {
+      console.error("Failed to fetch customer bookings:", error);
+
+      res.status(500).send({
         success: false,
-        message: "Pending booking not found or already processed.",
+        message: "Failed to fetch bookings.",
       });
     }
+  });
 
-    res.status(200).send({
-      success: true,
-      message: "Booking cancelled successfully!",
-    });
-  } catch (error) {
-    console.error("Failed to cancel booking:", error);
+  // Cancel Customer Booking
+  app.patch("/customer/bookings/:id/cancel", verifyUser, async (req, res) => {
+    try {
+      if (req.user.role !== "customer") {
+        return res.status(403).send({
+          success: false,
+          message: "Only customers can cancel bookings.",
+        });
+      }
 
-    res.status(500).send({
-      success: false,
-      message: "Failed to cancel booking.",
-    });
-  }
-});
+      const { id } = req.params;
+
+      if (!ObjectId.isValid(id)) {
+        return res.status(400).send({
+          success: false,
+          message: "Invalid booking ID.",
+        });
+      }
+
+      const result = await bookingsCollection.updateOne(
+        {
+          _id: new ObjectId(id),
+          customerId: req.user.id,
+          status: "pending",
+        },
+        {
+          $set: {
+            status: "cancelled",
+            updatedAt: new Date(),
+          },
+        },
+      );
+
+      if (result.matchedCount === 0) {
+        return res.status(404).send({
+          success: false,
+          message: "Pending booking not found or already processed.",
+        });
+      }
+
+      res.status(200).send({
+        success: true,
+        message: "Booking cancelled successfully!",
+      });
+    } catch (error) {
+      console.error("Failed to cancel booking:", error);
+
+      res.status(500).send({
+        success: false,
+        message: "Failed to cancel booking.",
+      });
+    }
+  });
 
   // Get featured services
   app.get("/services/featured", async (req, res) => {
@@ -457,288 +508,366 @@ app.patch("/customer/bookings/:id/cancel", verifyUser, async (req, res) => {
     }
   });
 
-// Get Vendor Profile
-app.get("/vendor/profile", verifyUser, verifyVendor, async (req, res) => {
-  try {
-    const vendor = await usersCollection.findOne(
-      { _id: new ObjectId(req.user.id) },
-      {
-        projection: {
-          name: 1,
-          email: 1,
-          image: 1,
-          role: 1,
-          phone: 1,
-          location: 1,
-          bio: 1,
-        },
-      }
-    );
-
-    if (!vendor) {
-      return res.status(404).send({
-        success: false,
-        message: "Vendor profile not found.",
-      });
-    }
-
-    res.status(200).send({
-      success: true,
-      vendor,
-    });
-  } catch (error) {
-    console.error("Failed to load vendor profile:", error);
-
-    res.status(500).send({
-      success: false,
-      message: "Failed to load vendor profile.",
-    });
-  }
-});
-
-// Get Available Subscription Plans
-app.get("/subscription-plans", async (req, res) => {
-  try {
-    const plans = [
-      {
-        id: "basic",
-        name: "Basic",
-        price: 0,
-        duration: "Free forever",
-        features: [
-          "Add up to 2 wedding services",
-          "Manage booking requests",
-          "Basic vendor profile",
-        ],
-      },
-      {
-        id: "standard",
-        name: "Standard",
-        price: 999,
-        duration: "Per month",
-        features: [
-          "Add up to 10 wedding services",
-          "Manage booking requests",
-          "Enhanced vendor profile",
-          "Priority support",
-        ],
-      },
-      {
-        id: "premium",
-        name: "Premium",
-        price: 1999,
-        duration: "Per month",
-        features: [
-          "Unlimited wedding services",
-          "Manage booking requests",
-          "Featured vendor profile",
-          "Priority support",
-          "Premium visibility",
-        ],
-      },
-    ];
-
-    res.status(200).send({
-      success: true,
-      plans,
-    });
-  } catch (error) {
-    console.error("Failed to fetch subscription plans:", error);
-
-    res.status(500).send({
-      success: false,
-      message: "Failed to load subscription plans.",
-    });
-  }
-});
-
-
-// Update Vendor Profile
-app.patch("/vendor/profile", verifyUser, verifyVendor, async (req, res) => {
-  try {
-    const { name, image, phone, location, bio } = req.body;
-
-    if (!name?.trim()) {
-      return res.status(400).send({
-        success: false,
-        message: "Name is required.",
-      });
-    }
-
-    const result = await usersCollection.updateOne(
-      { _id: new ObjectId(req.user.id) },
-      {
-        $set: {
-          name: name.trim(),
-          image: image?.trim() || "",
-          phone: phone?.trim() || "",
-          location: location?.trim() || "",
-          bio: bio?.trim() || "",
-          updatedAt: new Date(),
-        },
-      }
-    );
-
-    if (result.matchedCount === 0) {
-      return res.status(404).send({
-        success: false,
-        message: "Vendor not found.",
-      });
-    }
-
-    res.status(200).send({
-      success: true,
-      message: "Profile updated successfully!",
-    });
-  } catch (error) {
-    console.error("Failed to update vendor profile:", error);
-
-    res.status(500).send({
-      success: false,
-      message: "Failed to update profile.",
-    });
-  }
-});
-
-  // Update Vendor Service
-app.patch("/vendor/services/:id", verifyUser, verifyVendor, async (req, res) => {
-  try {
-    const { id } = req.params;
-    const { serviceName, category, description, price, location, images } = req.body;
-
-    if (!ObjectId.isValid(id)) {
-      return res.status(400).send({
-        success: false,
-        message: "Invalid service ID.",
-      });
-    }
-
-    if (!serviceName || !category || !description || !price || !location || !images) {
-      return res.status(400).send({
-        success: false,
-        message: "Please provide all required fields.",
-      });
-    }
-
-    const result = await servicesCollection.updateOne(
-      {
-        _id: new ObjectId(id),
-        vendorId: req.user.id,
-      },
-      {
-        $set: {
-          serviceName,
-          category,
-          description,
-          price: Number(price),
-          location,
-          images: [images],
-          status: "pending",
-          updatedAt: new Date(),
-        },
-      }
-    );
-
-    if (result.matchedCount === 0) {
-      return res.status(404).send({
-        success: false,
-        message: "Service not found.",
-      });
-    }
-
-    res.status(200).send({
-      success: true,
-      message: "Service updated successfully! It is pending admin approval.",
-    });
-  } catch (error) {
-    console.error("Failed to update service:", error);
-
-    res.status(500).send({
-      success: false,
-      message: "Failed to update service.",
-    });
-  }
-});
-  // Get Vendor Bookings
-app.get("/vendor/bookings", verifyUser, verifyVendor, async (req, res) => {
-  try {
-    const bookings = await bookingsCollection
-      .find({ vendorId: req.user.id })
-      .sort({ createdAt: -1 })
-      .toArray();
-
-    res.status(200).send({
-      success: true,
-      bookings,
-    });
-  } catch (error) {
-    console.error("Failed to fetch vendor bookings:", error);
-
-    res.status(500).send({
-      success: false,
-      message: "Failed to fetch bookings.",
-    });
-  }
-});
-// Update Vendor Booking Status
-app.patch(
-  "/vendor/bookings/:id/status",
-  verifyUser,
-  verifyVendor,
-  async (req, res) => {
+  // Get Vendor Profile
+  app.get("/vendor/profile", verifyUser, verifyVendor, async (req, res) => {
     try {
-      const { id } = req.params;
-      const { status } = req.body;
-
-      if (!ObjectId.isValid(id)) {
-        return res.status(400).send({
-          success: false,
-          message: "Invalid booking ID.",
-        });
-      }
-
-      if (!["accepted", "rejected"].includes(status)) {
-        return res.status(400).send({
-          success: false,
-          message: "Invalid booking status.",
-        });
-      }
-
-      const result = await bookingsCollection.updateOne(
+      const vendor = await usersCollection.findOne(
+        { _id: new ObjectId(req.user.id) },
         {
-          _id: new ObjectId(id),
-          vendorId: req.user.id,
-          status: "pending",
-        },
-        {
-          $set: {
-            status,
-            updatedAt: new Date(),
+          projection: {
+            name: 1,
+            email: 1,
+            image: 1,
+            role: 1,
+            phone: 1,
+            location: 1,
+            bio: 1,
           },
-        }
+        },
       );
 
-      if (result.matchedCount === 0) {
+      if (!vendor) {
         return res.status(404).send({
           success: false,
-          message: "Pending booking not found.",
+          message: "Vendor profile not found.",
         });
       }
 
       res.status(200).send({
         success: true,
-        message: `Booking ${status} successfully!`,
+        vendor,
       });
     } catch (error) {
-      console.error("Failed to update booking:", error);
+      console.error("Failed to load vendor profile:", error);
 
       res.status(500).send({
         success: false,
-        message: "Failed to update booking status.",
+        message: "Failed to load vendor profile.",
+      });
+    }
+  });
+
+  // Get Available Subscription Plans
+  app.get("/subscription-plans", async (req, res) => {
+    try {
+      const plans = [
+        {
+          id: "basic",
+          name: "Basic",
+          price: 0,
+          duration: "Free forever",
+          features: [
+            "Add up to 2 wedding services",
+            "Manage booking requests",
+            "Basic vendor profile",
+          ],
+        },
+        // {
+        //   id: "standard",
+        //   name: "Standard",
+        //   price: 999,
+        //   duration: "Per month",
+        //   features: [
+        //     "Add up to 10 wedding services",
+        //     "Manage booking requests",
+        //     "Enhanced vendor profile",
+        //     "Priority support",
+        //   ],
+        // },
+        {
+          id: "premium",
+          name: "Premium",
+          price: 1999,
+          duration: "Per month",
+          features: [
+            "Unlimited wedding services",
+            "Manage booking requests",
+            "Featured vendor profile",
+            "Priority support",
+            "Premium visibility",
+          ],
+        },
+      ];
+
+      res.status(200).send({
+        success: true,
+        plans,
+      });
+    } catch (error) {
+      console.error("Failed to fetch subscription plans:", error);
+
+      res.status(500).send({
+        success: false,
+        message: "Failed to load subscription plans.",
+      });
+    }
+  });
+  // Create Premium Subscription Checkout
+app.post(
+  "/create-checkout-session",
+  verifyUser,
+  verifyVendor,
+  async (req, res) => {
+    try {
+      if (!process.env.STRIPE_PREMIUM_PRICE_ID) {
+        return res.status(500).send({
+          success: false,
+          message: "Premium price ID is missing.",
+        });
+      }
+
+      const session = await stripe.checkout.sessions.create({
+        mode: "subscription",
+
+        // payment_method_types: ["card"],
+
+        customer_email: req.user.email,
+
+        client_reference_id: req.user.id,
+
+        metadata: {
+          vendorId: req.user.id,
+          plan: "premium",
+        },
+
+        subscription_data: {
+          metadata: {
+            vendorId: req.user.id,
+            plan: "premium",
+          },
+        },
+
+        line_items: [
+          {
+            price: process.env.STRIPE_PREMIUM_PRICE_ID,
+            quantity: 1,
+          },
+        ],
+
+        success_url:
+          "http://localhost:3000/payment/success?session_id={CHECKOUT_SESSION_ID}",
+
+        cancel_url: "http://localhost:3000/payment/cancel",
+      });
+
+      res.status(200).send({
+        success: true,
+        url: session.url,
+      });
+    } catch (error) {
+      console.error("Stripe checkout error:", error);
+
+      res.status(500).send({
+        success: false,
+        message: "Unable to create checkout session.",
       });
     }
   }
 );
+
+
+
+
+  // Update Vendor Profile
+  app.patch("/vendor/profile", verifyUser, verifyVendor, async (req, res) => {
+    try {
+      const { name, image, phone, location, bio } = req.body;
+
+      if (!name?.trim()) {
+        return res.status(400).send({
+          success: false,
+          message: "Name is required.",
+        });
+      }
+
+      const result = await usersCollection.updateOne(
+        { _id: new ObjectId(req.user.id) },
+        {
+          $set: {
+            name: name.trim(),
+            image: image?.trim() || "",
+            phone: phone?.trim() || "",
+            location: location?.trim() || "",
+            bio: bio?.trim() || "",
+            updatedAt: new Date(),
+          },
+        },
+      );
+
+      if (result.matchedCount === 0) {
+        return res.status(404).send({
+          success: false,
+          message: "Vendor not found.",
+        });
+      }
+
+      res.status(200).send({
+        success: true,
+        message: "Profile updated successfully!",
+      });
+    } catch (error) {
+      console.error("Failed to update vendor profile:", error);
+
+      res.status(500).send({
+        success: false,
+        message: "Failed to update profile.",
+      });
+    }
+  });
+
+  // Update Vendor Service
+  app.patch(
+    "/vendor/services/:id",
+    verifyUser,
+    verifyVendor,
+    async (req, res) => {
+      try {
+        const { id } = req.params;
+        const { serviceName, category, description, price, location, images } =
+          req.body;
+
+        if (!ObjectId.isValid(id)) {
+          return res.status(400).send({
+            success: false,
+            message: "Invalid service ID.",
+          });
+        }
+
+        if (
+          !serviceName ||
+          !category ||
+          !description ||
+          !price ||
+          !location ||
+          !images
+        ) {
+          return res.status(400).send({
+            success: false,
+            message: "Please provide all required fields.",
+          });
+        }
+
+        const result = await servicesCollection.updateOne(
+          {
+            _id: new ObjectId(id),
+            vendorId: req.user.id,
+          },
+          {
+            $set: {
+              serviceName,
+              category,
+              description,
+              price: Number(price),
+              location,
+              images: [images],
+              status: "pending",
+              updatedAt: new Date(),
+            },
+          },
+        );
+
+        if (result.matchedCount === 0) {
+          return res.status(404).send({
+            success: false,
+            message: "Service not found.",
+          });
+        }
+
+        res.status(200).send({
+          success: true,
+          message:
+            "Service updated successfully! It is pending admin approval.",
+        });
+      } catch (error) {
+        console.error("Failed to update service:", error);
+
+        res.status(500).send({
+          success: false,
+          message: "Failed to update service.",
+        });
+      }
+    },
+  );
+  // Get Vendor Bookings
+  app.get("/vendor/bookings", verifyUser, verifyVendor, async (req, res) => {
+    try {
+      const bookings = await bookingsCollection
+        .find({ vendorId: req.user.id })
+        .sort({ createdAt: -1 })
+        .toArray();
+
+      res.status(200).send({
+        success: true,
+        bookings,
+      });
+    } catch (error) {
+      console.error("Failed to fetch vendor bookings:", error);
+
+      res.status(500).send({
+        success: false,
+        message: "Failed to fetch bookings.",
+      });
+    }
+  });
+  // Update Vendor Booking Status
+  app.patch(
+    "/vendor/bookings/:id/status",
+    verifyUser,
+    verifyVendor,
+    async (req, res) => {
+      try {
+        const { id } = req.params;
+        const { status } = req.body;
+
+        if (!ObjectId.isValid(id)) {
+          return res.status(400).send({
+            success: false,
+            message: "Invalid booking ID.",
+          });
+        }
+
+        if (!["accepted", "rejected"].includes(status)) {
+          return res.status(400).send({
+            success: false,
+            message: "Invalid booking status.",
+          });
+        }
+
+        const result = await bookingsCollection.updateOne(
+          {
+            _id: new ObjectId(id),
+            vendorId: req.user.id,
+            status: "pending",
+          },
+          {
+            $set: {
+              status,
+              updatedAt: new Date(),
+            },
+          },
+        );
+
+        if (result.matchedCount === 0) {
+          return res.status(404).send({
+            success: false,
+            message: "Pending booking not found.",
+          });
+        }
+
+        res.status(200).send({
+          success: true,
+          message: `Booking ${status} successfully!`,
+        });
+      } catch (error) {
+        console.error("Failed to update booking:", error);
+
+        res.status(500).send({
+          success: false,
+          message: "Failed to update booking status.",
+        });
+      }
+    },
+  );
   // Get all services for admin
   app.get("/admin/services", verifyUser, verifyAdmin, async (req, res) => {
     try {
@@ -794,27 +923,27 @@ app.patch(
     }
   });
 
-// Get All Platform Transactions
-app.get("/admin/transactions", verifyUser, verifyAdmin, async (req, res) => {
-  try {
-    const transactions = await transactionsCollection
-      .find({})
-      .sort({ createdAt: -1 })
-      .toArray();
+  // Get All Platform Transactions
+  app.get("/admin/transactions", verifyUser, verifyAdmin, async (req, res) => {
+    try {
+      const transactions = await transactionsCollection
+        .find({})
+        .sort({ createdAt: -1 })
+        .toArray();
 
-    res.status(200).send({
-      success: true,
-      transactions,
-    });
-  } catch (error) {
-    console.error("Failed to fetch transactions:", error);
+      res.status(200).send({
+        success: true,
+        transactions,
+      });
+    } catch (error) {
+      console.error("Failed to fetch transactions:", error);
 
-    res.status(500).send({
-      success: false,
-      message: "Failed to fetch transactions.",
-    });
-  }
-});
+      res.status(500).send({
+        success: false,
+        message: "Failed to fetch transactions.",
+      });
+    }
+  });
 
   // Block or Unblock User (Admin Only)
   app.patch(
@@ -976,48 +1105,48 @@ app.get("/admin/transactions", verifyUser, verifyAdmin, async (req, res) => {
     },
   );
 
-// Delete Vendor Service
-app.delete(
-  "/vendor/services/:id",
-  verifyUser,
-  verifyVendor,
-  async (req, res) => {
-    try {
-      const { id } = req.params;
+  // Delete Vendor Service
+  app.delete(
+    "/vendor/services/:id",
+    verifyUser,
+    verifyVendor,
+    async (req, res) => {
+      try {
+        const { id } = req.params;
 
-      if (!ObjectId.isValid(id)) {
-        return res.status(400).send({
+        if (!ObjectId.isValid(id)) {
+          return res.status(400).send({
+            success: false,
+            message: "Invalid service ID.",
+          });
+        }
+
+        const result = await servicesCollection.deleteOne({
+          _id: new ObjectId(id),
+          vendorId: req.user.id,
+        });
+
+        if (result.deletedCount === 0) {
+          return res.status(404).send({
+            success: false,
+            message: "Service not found.",
+          });
+        }
+
+        res.status(200).send({
+          success: true,
+          message: "Service deleted successfully.",
+        });
+      } catch (error) {
+        console.error("Failed to delete vendor service:", error);
+
+        res.status(500).send({
           success: false,
-          message: "Invalid service ID.",
+          message: "Failed to delete service.",
         });
       }
-
-      const result = await servicesCollection.deleteOne({
-        _id: new ObjectId(id),
-        vendorId: req.user.id,
-      });
-
-      if (result.deletedCount === 0) {
-        return res.status(404).send({
-          success: false,
-          message: "Service not found.",
-        });
-      }
-
-      res.status(200).send({
-        success: true,
-        message: "Service deleted successfully.",
-      });
-    } catch (error) {
-      console.error("Failed to delete vendor service:", error);
-
-      res.status(500).send({
-        success: false,
-        message: "Failed to delete service.",
-      });
-    }
-  }
-);
+    },
+  );
 
   // Get all approved and active services
   app.get("/services", async (req, res) => {

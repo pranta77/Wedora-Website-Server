@@ -4,8 +4,9 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
-  },
+  "dev": "nodemon index.js",
+  "start": "node index.js"
+},
   "keywords": [],
   "author": "",
   "license": "ISC",
@@ -17,6 +18,7 @@
     "dotenv": "^18.0.10",
     "express": "^5.3.0",
     "jose": "^6.2.17",
-    "mongodb": "^7.9.0"
+    "mongodb": "^7.9.0",
+    "stripe": "^23.2.0"
   }
 }
