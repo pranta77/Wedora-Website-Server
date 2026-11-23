@@ -244,33 +244,80 @@ try {
           }
         }
 
-        // Subscription cancelled or expired
-        if (event.type === "customer.subscription.deleted") {
-          const subscription = event.data.object;
-          const vendorId = subscription.metadata?.vendorId;
+// Subscription updated (including scheduled cancellation)
+if (event.type === "customer.subscription.updated") {
+  const subscription = event.data.object;
+  const vendorId = subscription.metadata?.vendorId;
 
-          if (ObjectId.isValid(vendorId)) {
-            await usersCollection.updateOne(
-              {
-                _id: new ObjectId(vendorId),
-                stripeSubscriptionId: subscription.id,
-              },
-              {
-                $set: {
-                  subscriptionPlan: "free",
-                  subscriptionStatus: "canceled",
-                  subscriptionUpdatedAt: new Date(),
-                },
-                $unset: {
-                  subscriptionExpiresAt: "",
-                  stripeSubscriptionId: "",
-                },
-              },
-            );
+  if (ObjectId.isValid(vendorId)) {
+    const periodEnd =
+      subscription.items?.data?.[0]?.current_period_end ||
+      subscription.current_period_end;
 
-            console.log("Premium subscription cancelled:", vendorId);
-          }
-        }
+    const updateData = {
+      subscriptionStatus: subscription.status,
+      subscriptionUpdatedAt: new Date(),
+      subscriptionCancelAtPeriodEnd:
+        subscription.cancel_at_period_end,
+    };
+
+    if (periodEnd) {
+      updateData.subscriptionExpiresAt = new Date(
+        periodEnd * 1000
+      );
+    }
+
+    await usersCollection.updateOne(
+      {
+        _id: new ObjectId(vendorId),
+        stripeSubscriptionId: subscription.id,
+      },
+      {
+        $set: updateData,
+      }
+    );
+
+    console.log(
+      "Subscription updated:",
+      vendorId,
+      subscription.status
+    );
+  }
+}
+
+        
+// Subscription actually expired or cancelled
+if (event.type === "customer.subscription.deleted") {
+  const subscription = event.data.object;
+  const vendorId = subscription.metadata?.vendorId;
+
+  if (ObjectId.isValid(vendorId)) {
+    await usersCollection.updateOne(
+      {
+        _id: new ObjectId(vendorId),
+        stripeSubscriptionId: subscription.id,
+      },
+      {
+        $set: {
+          subscriptionPlan: "basic",
+          subscriptionStatus: "canceled",
+          subscriptionCancelAtPeriodEnd: false,
+          subscriptionUpdatedAt: new Date(),
+        },
+        $unset: {
+          subscriptionExpiresAt: "",
+          stripeSubscriptionId: "",
+        },
+      }
+    );
+
+    console.log(
+      "Vendor downgraded to Basic:",
+      vendorId
+    );
+  }
+}
+
 
         return res.status(200).send({ received: true });
       } catch (error) {
@@ -786,6 +833,109 @@ try {
       }
     },
   );
+
+
+app.post(
+  "/cancel-subscription",
+  verifyUser,
+  verifyVendor,
+  async (req, res) => {
+    try {
+      const vendorId = req.user.id;
+
+      if (!ObjectId.isValid(vendorId)) {
+        return res.status(400).send({
+          success: false,
+          message: "Invalid vendor ID.",
+        });
+      }
+
+      // Find vendor
+      const vendor = await usersCollection.findOne({
+        _id: new ObjectId(vendorId),
+        role: "vendor",
+      });
+
+      if (!vendor || !vendor.stripeSubscriptionId) {
+        return res.status(404).send({
+          success: false,
+          message: "No active subscription found.",
+        });
+      }
+
+      // Retrieve Stripe subscription
+      const subscription = await stripe.subscriptions.retrieve(
+        vendor.stripeSubscriptionId
+      );
+
+      // Verify subscription ownership
+      if (subscription.metadata?.vendorId !== vendorId) {
+        return res.status(403).send({
+          success: false,
+          message: "Subscription ownership verification failed.",
+        });
+      }
+
+      if (!["active", "trialing"].includes(subscription.status)) {
+        return res.status(400).send({
+          success: false,
+          message: "Subscription is not active.",
+        });
+      }
+
+      if (subscription.cancel_at_period_end) {
+        return res.status(200).send({
+          success: true,
+          message: "Cancellation is already scheduled.",
+        });
+      }
+
+      // Schedule cancellation at billing period end
+      const updatedSubscription = await stripe.subscriptions.update(
+        subscription.id,
+        {
+          cancel_at_period_end: true,
+        }
+      );
+
+      const periodEnd =
+        updatedSubscription.items?.data?.[0]?.current_period_end ||
+        updatedSubscription.current_period_end;
+
+      await usersCollection.updateOne(
+        {
+          _id: new ObjectId(vendorId),
+          stripeSubscriptionId: subscription.id,
+        },
+        {
+          $set: {
+            subscriptionCancelAtPeriodEnd: true,
+            subscriptionExpiresAt: periodEnd
+              ? new Date(periodEnd * 1000)
+              : vendor.subscriptionExpiresAt,
+            subscriptionUpdatedAt: new Date(),
+          },
+        }
+      );
+
+      return res.status(200).send({
+        success: true,
+        message: "Subscription cancellation scheduled successfully.",
+        expiresAt: periodEnd
+          ? new Date(periodEnd * 1000)
+          : null,
+      });
+    } catch (error) {
+      console.error("Subscription cancellation error:", error);
+
+      return res.status(500).send({
+        success: false,
+        message: "Unable to cancel subscription.",
+      });
+    }
+  }
+);
+
 
   // Update Vendor Profile
   app.patch("/vendor/profile", verifyUser, verifyVendor, async (req, res) => {
