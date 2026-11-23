@@ -612,62 +612,103 @@ if (event.type === "customer.subscription.deleted") {
   });
 
   // Add a new wedding service
-  app.post("/services", verifyUser, verifyVendor, async (req, res) => {
-    try {
-      const { serviceName, category, description, price, location, images } =
-        req.body;
+  
+// Add a new wedding service  (change)
+app.post("/services", verifyUser, verifyVendor, async (req, res) => {
+  try {
+    const { serviceName, category, description, price, location, images } =
+      req.body;
 
-      if (
-        !serviceName ||
-        !category ||
-        !description ||
-        !price ||
-        !location ||
-        !images
-      ) {
-        return res.status(400).send({
-          success: false,
-          message: "Please provide all required fields.",
-        });
-      }
-
-      if (Number(price) <= 0 || !Number.isFinite(Number(price))) {
-        return res.status(400).send({
-          success: false,
-          message: "Please provide a valid price.",
-        });
-      }
-
-      const newService = {
-        vendorId: req.user.id,
-        vendorName: req.user.name,
-        serviceName,
-        category,
-        description,
-        price: Number(price),
-        location,
-        images: [images],
-        status: "pending",
-        isActive: true,
-        createdAt: new Date(),
-      };
-
-      const result = await servicesCollection.insertOne(newService);
-
-      res.status(201).send({
-        success: true,
-        message: "Service submitted for admin approval!",
-        insertedId: result.insertedId,
-      });
-    } catch (error) {
-      console.error("Failed to add service:", error);
-
-      res.status(500).send({
+    if (
+      !serviceName ||
+      !category ||
+      !description ||
+      !price ||
+      !location ||
+      !images
+    ) {
+      return res.status(400).send({
         success: false,
-        message: "Failed to add service.",
+        message: "Please provide all required fields.",
       });
     }
-  });
+
+    if (Number(price) <= 0 || !Number.isFinite(Number(price))) {
+      return res.status(400).send({
+        success: false,
+        message: "Please provide a valid price.",
+      });
+    }
+
+    // Get vendor subscription information
+    const vendor = await usersCollection.findOne({
+      _id: new ObjectId(req.user.id),
+      role: "vendor",
+    });
+
+    if (!vendor) {
+      return res.status(404).send({
+        success: false,
+        message: "Vendor not found.",
+      });
+    }
+
+    // Check whether Premium subscription is valid
+    const isPremium =
+      vendor.subscriptionPlan === "premium" &&
+      ["active", "trialing"].includes(vendor.subscriptionStatus) &&
+      vendor.subscriptionExpiresAt &&
+      new Date(vendor.subscriptionExpiresAt) > new Date();
+
+    // Check Basic plan service limit
+    if (!isPremium) {
+      const activeServices = await servicesCollection.countDocuments({
+        vendorId: req.user.id,
+        status: "approved",
+        isActive: true,
+      });
+
+      if (activeServices >= 3) {
+        return res.status(403).send({
+          success: false,
+          message:
+            "Basic plan allows only 3 active services. Upgrade to Premium for unlimited services.",
+        });
+      }
+    }
+
+    // Create new service
+    const newService = {
+      vendorId: req.user.id,
+      vendorName: req.user.name,
+      serviceName,
+      category,
+      description,
+      price: Number(price),
+      location,
+      images: [images],
+      status: "pending",
+      isActive: true,
+      createdAt: new Date(),
+    };
+
+    const result = await servicesCollection.insertOne(newService);
+
+    res.status(201).send({
+      success: true,
+      message: "Service submitted for admin approval!",
+      insertedId: result.insertedId,
+    });
+  } catch (error) {
+    console.error("Failed to add service:", error);
+
+    res.status(500).send({
+      success: false,
+      message: "Failed to add service.",
+    });
+  }
+});
+
 
   // Get services belonging to the logged-in vendor
   app.get("/vendor/services", verifyUser, verifyVendor, async (req, res) => {
@@ -743,7 +784,7 @@ if (event.type === "customer.subscription.deleted") {
           price: 0,
           duration: "Free forever",
           features: [
-            "Add up to 2 wedding services",
+            "Add up to 3 active wedding services",
             "Manage booking requests",
             "Basic vendor profile",
           ],
@@ -1280,6 +1321,8 @@ app.post(
   );
 
   // Approve or reject a service
+  
+  // Approve or reject a service (change)
   app.patch(
     "/admin/services/:id/status",
     verifyUser,
@@ -1303,6 +1346,59 @@ app.post(
           });
         }
 
+        // Find pending service
+        const service = await servicesCollection.findOne({
+          _id: new ObjectId(id),
+          status: "pending",
+        });
+
+        if (!service) {
+          return res.status(404).send({
+            success: false,
+            message: "Pending service not found.",
+          });
+        }
+
+        // Apply service limit only when approving
+        if (status === "approved") {
+          const vendor = await usersCollection.findOne({
+            _id: new ObjectId(service.vendorId),
+            role: "vendor",
+          });
+
+          if (!vendor) {
+            return res.status(404).send({
+              success: false,
+              message: "Vendor not found.",
+            });
+          }
+
+          // Check Premium subscription
+          const isPremium =
+            vendor.subscriptionPlan === "premium" &&
+            ["active", "trialing"].includes(vendor.subscriptionStatus) &&
+            vendor.subscriptionExpiresAt &&
+            new Date(vendor.subscriptionExpiresAt) > new Date();
+
+          // Check Basic plan limit
+          if (!isPremium) {
+            const activeServices = await servicesCollection.countDocuments({
+              vendorId: service.vendorId,
+              status: "approved",
+              isActive: true,
+            });
+
+            if (activeServices >= 3) {
+              return res.status(403).send({
+                success: false,
+                message:
+                  "This vendor has reached the Basic plan limit of 3 active services.",
+              });
+            }
+          }
+        }
+
+        // Update service status
         const result = await servicesCollection.updateOne(
           {
             _id: new ObjectId(id),
@@ -1337,6 +1433,7 @@ app.post(
       }
     },
   );
+
 
   // Delete a service (Admin only)
   app.delete(
