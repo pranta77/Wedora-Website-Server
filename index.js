@@ -130,7 +130,6 @@ try {
     },
   });
 
-  
   // Better Auth route (must come before express.json)
   app.all("/api/auth/{*any}", toNodeHandler(auth));
 
@@ -148,7 +147,7 @@ try {
         event = stripe.webhooks.constructEvent(
           req.body,
           signature,
-          process.env.STRIPE_WEBHOOK_SECRET
+          process.env.STRIPE_WEBHOOK_SECRET,
         );
       } catch (error) {
         console.error("Webhook signature error:", error.message);
@@ -178,14 +177,14 @@ try {
           }
 
           // Prevent duplicate transaction records
-          const existingTransaction =
-            await transactionsCollection.findOne({
-              stripeSessionId: session.id,
-            });
+          const existingTransaction = await transactionsCollection.findOne({
+            stripeSessionId: session.id,
+          });
 
           if (!existingTransaction) {
-            const subscription =
-              await stripe.subscriptions.retrieve(session.subscription);
+            const subscription = await stripe.subscriptions.retrieve(
+              session.subscription,
+            );
 
             if (!["active", "trialing"].includes(subscription.status)) {
               return res.status(200).send({
@@ -219,13 +218,12 @@ try {
             };
 
             if (periodEnd) {
-              updateData.subscriptionExpiresAt =
-                new Date(periodEnd * 1000);
+              updateData.subscriptionExpiresAt = new Date(periodEnd * 1000);
             }
 
             await usersCollection.updateOne(
               { _id: new ObjectId(vendorId) },
-              { $set: updateData }
+              { $set: updateData },
             );
 
             // Save transaction
@@ -267,7 +265,7 @@ try {
                   subscriptionExpiresAt: "",
                   stripeSubscriptionId: "",
                 },
-              }
+              },
             );
 
             console.log("Premium subscription cancelled:", vendorId);
@@ -283,12 +281,11 @@ try {
           message: "Webhook processing failed.",
         });
       }
-    }
+    },
   );
 
   // Middleware for other API routes
   app.use(express.json());
-
 
   // Verify logged-in user
   const verifyUser = async (req, res, next) => {
@@ -661,6 +658,9 @@ try {
             phone: 1,
             location: 1,
             bio: 1,
+            subscriptionPlan: 1,
+            subscriptionStatus: 1,
+            subscriptionExpiresAt: 1,
           },
         },
       );
