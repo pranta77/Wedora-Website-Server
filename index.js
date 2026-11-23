@@ -7,18 +7,33 @@ import { betterAuth } from "better-auth";
 import { mongodbAdapter } from "@better-auth/mongo-adapter";
 import { fromNodeHeaders, toNodeHandler } from "better-auth/node";
 import Stripe from "stripe";
-// import { createRemoteJWKSet, jwtVerify } from "jose";
-
-
 
 const app = express();
+app.set("trust proxy", 1);
+
 const PORT = process.env.PORT || 5000;
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
+
+const isProduction =
+  process.env.NODE_ENV === "production" ||
+  process.env.BETTER_AUTH_URL?.startsWith("https://") ||
+  Boolean(process.env.VERCEL) ||
+  Boolean(process.env.RENDER);
+
+const CLIENT_URL =
+  process.env.CLIENT_URL ||
+  (isProduction ? "https://wedora-client.vercel.app" : "http://localhost:3000");
+
+const allowedOrigins = [
+  "http://localhost:3000",
+  "https://wedora-client.vercel.app",
+  ...(process.env.CLIENT_URL ? [process.env.CLIENT_URL] : []),
+];
 
 // CORS
 app.use(
   cors({
-    origin: "http://localhost:3000",
+    origin: allowedOrigins,
     credentials: true,
   }),
 );
@@ -38,49 +53,6 @@ try {
   const bookingsCollection = db.collection("bookings");
   const transactionsCollection = db.collection("transactions");
 
-
-  // JWT public key
-// const JWKS = createRemoteJWKSet(
-//   new URL("http://localhost:3000/api/auth/jwks")
-// );
-
-// Verify JWT token
-// const verifyToken = async (req, res, next) => {
-//   const authHeader = req.headers.authorization;
-
-//   if (!authHeader || !authHeader.startsWith("Bearer ")) {
-//     return res.status(401).send({
-//       success: false,
-//       message: "Unauthorized!",
-//     });
-//   }
-
-//   const token = authHeader.split(" ")[1];
-
-//   if (!token) {
-//     return res.status(401).send({
-//       success: false,
-//       message: "Unauthorized!",
-//     });
-//   }
-
-//   try {
-//     const { payload } = await jwtVerify(token, JWKS);
-
-//     req.user = {
-//       id: payload.sub,
-//       email: payload.email,
-//     };
-
-//     next();
-//   } catch (error) {
-//     return res.status(401).send({
-//       success: false,
-//       message: "Invalid or expired token!",
-//     });
-//   }
-// };
-
   // Better Auth configuration
   const auth = betterAuth({
     database: mongodbAdapter(db),
@@ -88,7 +60,17 @@ try {
     secret: process.env.BETTER_AUTH_SECRET,
     baseURL: process.env.BETTER_AUTH_URL,
 
-    trustedOrigins: ["http://localhost:3000"],
+    trustedOrigins: allowedOrigins,
+
+    advanced: {
+      useSecureCookies: isProduction,
+      defaultCookieAttributes: {
+        sameSite: isProduction ? "none" : "lax",
+        secure: isProduction,
+        httpOnly: true,
+        partitioned: isProduction,
+      },
+    },
 
     user: {
       modelName: "users",
@@ -148,14 +130,166 @@ try {
     },
   });
 
+  
   // Better Auth route (must come before express.json)
   app.all("/api/auth/{*any}", toNodeHandler(auth));
 
+  // Stripe Webhook (must come before express.json)
+  app.post(
+    "/webhook",
+    express.raw({ type: "application/json" }),
+    async (req, res) => {
+      const signature = req.headers["stripe-signature"];
 
+      let event;
 
+      // Verify Stripe webhook signature
+      try {
+        event = stripe.webhooks.constructEvent(
+          req.body,
+          signature,
+          process.env.STRIPE_WEBHOOK_SECRET
+        );
+      } catch (error) {
+        console.error("Webhook signature error:", error.message);
+
+        return res.status(400).send({
+          success: false,
+          message: "Invalid webhook signature.",
+        });
+      }
+
+      try {
+        // Successful subscription checkout
+        if (event.type === "checkout.session.completed") {
+          const session = event.data.object;
+
+          if (session.mode !== "subscription") {
+            return res.status(200).send({ received: true });
+          }
+
+          const vendorId = session.metadata?.vendorId;
+
+          if (!ObjectId.isValid(vendorId)) {
+            return res.status(400).send({
+              success: false,
+              message: "Invalid vendor ID.",
+            });
+          }
+
+          // Prevent duplicate transaction records
+          const existingTransaction =
+            await transactionsCollection.findOne({
+              stripeSessionId: session.id,
+            });
+
+          if (!existingTransaction) {
+            const subscription =
+              await stripe.subscriptions.retrieve(session.subscription);
+
+            if (!["active", "trialing"].includes(subscription.status)) {
+              return res.status(200).send({
+                received: true,
+                activated: false,
+              });
+            }
+
+            const vendor = await usersCollection.findOne({
+              _id: new ObjectId(vendorId),
+              role: "vendor",
+            });
+
+            if (!vendor) {
+              return res.status(404).send({
+                success: false,
+                message: "Vendor not found.",
+              });
+            }
+
+            const periodEnd =
+              subscription.items?.data?.[0]?.current_period_end ||
+              subscription.current_period_end;
+
+            const updateData = {
+              subscriptionPlan: "premium",
+              subscriptionStatus: subscription.status,
+              stripeCustomerId: session.customer,
+              stripeSubscriptionId: session.subscription,
+              subscriptionUpdatedAt: new Date(),
+            };
+
+            if (periodEnd) {
+              updateData.subscriptionExpiresAt =
+                new Date(periodEnd * 1000);
+            }
+
+            await usersCollection.updateOne(
+              { _id: new ObjectId(vendorId) },
+              { $set: updateData }
+            );
+
+            // Save transaction
+            await transactionsCollection.insertOne({
+              vendorId,
+              vendorName: vendor.name,
+              vendorEmail: vendor.email,
+              plan: "premium",
+              stripeSessionId: session.id,
+              stripeSubscriptionId: session.subscription,
+              amount: session.amount_total,
+              currency: session.currency,
+              status: "completed",
+              createdAt: new Date(),
+            });
+
+            console.log("Premium subscription activated:", vendor.email);
+          }
+        }
+
+        // Subscription cancelled or expired
+        if (event.type === "customer.subscription.deleted") {
+          const subscription = event.data.object;
+          const vendorId = subscription.metadata?.vendorId;
+
+          if (ObjectId.isValid(vendorId)) {
+            await usersCollection.updateOne(
+              {
+                _id: new ObjectId(vendorId),
+                stripeSubscriptionId: subscription.id,
+              },
+              {
+                $set: {
+                  subscriptionPlan: "free",
+                  subscriptionStatus: "canceled",
+                  subscriptionUpdatedAt: new Date(),
+                },
+                $unset: {
+                  subscriptionExpiresAt: "",
+                  stripeSubscriptionId: "",
+                },
+              }
+            );
+
+            console.log("Premium subscription cancelled:", vendorId);
+          }
+        }
+
+        return res.status(200).send({ received: true });
+      } catch (error) {
+        console.error("Webhook processing error:", error);
+
+        return res.status(500).send({
+          success: false,
+          message: "Webhook processing failed.",
+        });
+      }
+    }
+  );
 
   // Middleware for other API routes
   app.use(express.json());
+
+
   // Verify logged-in user
   const verifyUser = async (req, res, next) => {
     try {
@@ -200,6 +334,7 @@ try {
 
     next();
   };
+
   // Allow admins only
   const verifyAdmin = (req, res, next) => {
     if (req.user.role !== "admin") {
@@ -211,6 +346,7 @@ try {
 
     next();
   };
+
   // Create Booking (Customer Only)
   app.post("/bookings", verifyUser, async (req, res) => {
     try {
@@ -321,6 +457,7 @@ try {
       });
     }
   });
+
   // Get Customer Bookings
   app.get("/customer/bookings", verifyUser, async (req, res) => {
     try {
@@ -429,6 +566,7 @@ try {
       });
     }
   });
+
   // Add a new wedding service
   app.post("/services", verifyUser, verifyVendor, async (req, res) => {
     try {
@@ -486,6 +624,7 @@ try {
       });
     }
   });
+
   // Get services belonging to the logged-in vendor
   app.get("/vendor/services", verifyUser, verifyVendor, async (req, res) => {
     try {
@@ -562,18 +701,6 @@ try {
             "Basic vendor profile",
           ],
         },
-        // {
-        //   id: "standard",
-        //   name: "Standard",
-        //   price: 999,
-        //   duration: "Per month",
-        //   features: [
-        //     "Add up to 10 wedding services",
-        //     "Manage booking requests",
-        //     "Enhanced vendor profile",
-        //     "Priority support",
-        //   ],
-        // },
         {
           id: "premium",
           name: "Premium",
@@ -602,71 +729,63 @@ try {
       });
     }
   });
+
   // Create Premium Subscription Checkout
-app.post(
-  "/create-checkout-session",
-  verifyUser,
-  verifyVendor,
-  async (req, res) => {
-    try {
-      if (!process.env.STRIPE_PREMIUM_PRICE_ID) {
-        return res.status(500).send({
-          success: false,
-          message: "Premium price ID is missing.",
-        });
-      }
+  app.post(
+    "/create-checkout-session",
+    verifyUser,
+    verifyVendor,
+    async (req, res) => {
+      try {
+        if (!process.env.STRIPE_PREMIUM_PRICE_ID) {
+          return res.status(500).send({
+            success: false,
+            message: "Premium price ID is missing.",
+          });
+        }
 
-      const session = await stripe.checkout.sessions.create({
-        mode: "subscription",
+        const session = await stripe.checkout.sessions.create({
+          mode: "subscription",
+          customer_email: req.user.email,
+          client_reference_id: req.user.id,
 
-        // payment_method_types: ["card"],
-
-        customer_email: req.user.email,
-
-        client_reference_id: req.user.id,
-
-        metadata: {
-          vendorId: req.user.id,
-          plan: "premium",
-        },
-
-        subscription_data: {
           metadata: {
             vendorId: req.user.id,
             plan: "premium",
           },
-        },
 
-        line_items: [
-          {
-            price: process.env.STRIPE_PREMIUM_PRICE_ID,
-            quantity: 1,
+          subscription_data: {
+            metadata: {
+              vendorId: req.user.id,
+              plan: "premium",
+            },
           },
-        ],
 
-        success_url:
-          "http://localhost:3000/payment/success?session_id={CHECKOUT_SESSION_ID}",
+          line_items: [
+            {
+              price: process.env.STRIPE_PREMIUM_PRICE_ID,
+              quantity: 1,
+            },
+          ],
 
-        cancel_url: "http://localhost:3000/payment/cancel",
-      });
+          success_url: `${CLIENT_URL}/payment/success?session_id={CHECKOUT_SESSION_ID}`,
+          cancel_url: `${CLIENT_URL}/payment/cancel`,
+        });
 
-      res.status(200).send({
-        success: true,
-        url: session.url,
-      });
-    } catch (error) {
-      console.error("Stripe checkout error:", error);
+        res.status(200).send({
+          success: true,
+          url: session.url,
+        });
+      } catch (error) {
+        console.error("Stripe checkout error:", error);
 
-      res.status(500).send({
-        success: false,
-        message: "Unable to create checkout session.",
-      });
-    }
-  }
-);
-
-
-
+        res.status(500).send({
+          success: false,
+          message: "Unable to create checkout session.",
+        });
+      }
+    },
+  );
 
   // Update Vendor Profile
   app.patch("/vendor/profile", verifyUser, verifyVendor, async (req, res) => {
@@ -788,6 +907,7 @@ app.post(
       }
     },
   );
+
   // Get Vendor Bookings
   app.get("/vendor/bookings", verifyUser, verifyVendor, async (req, res) => {
     try {
@@ -809,6 +929,7 @@ app.post(
       });
     }
   });
+
   // Update Vendor Booking Status
   app.patch(
     "/vendor/bookings/:id/status",
@@ -868,6 +989,7 @@ app.post(
       }
     },
   );
+
   // Get all services for admin
   app.get("/admin/services", verifyUser, verifyAdmin, async (req, res) => {
     try {
@@ -889,6 +1011,7 @@ app.post(
       });
     }
   });
+
   // Get All Users (Admin Only)
   app.get("/admin/users", verifyUser, verifyAdmin, async (req, res) => {
     try {
@@ -1005,6 +1128,7 @@ app.post(
       }
     },
   );
+
   // Approve or reject a service
   app.patch(
     "/admin/services/:id/status",
@@ -1063,6 +1187,7 @@ app.post(
       }
     },
   );
+
   // Delete a service (Admin only)
   app.delete(
     "/admin/services/:id",
@@ -1172,6 +1297,7 @@ app.post(
       });
     }
   });
+
   // Get Single Service Details
   app.get("/services/:id", async (req, res) => {
     try {
@@ -1216,10 +1342,12 @@ app.post(
     res.send("Hello Wedora Server");
   });
 
-  // Start server
-  app.listen(PORT, () => {
-    console.log("Wedora server listening on port " + PORT);
-  });
+  // Start server (Vercel serverless e app.listen skip korbe)
+  if (!process.env.VERCEL) {
+    app.listen(PORT, () => {
+      console.log("Wedora server listening on port " + PORT);
+    });
+  }
 } catch (error) {
   console.error("MongoDB connection failed:", error);
   process.exit(1);
