@@ -128,6 +128,13 @@ try {
       enabled: true,
       minPasswordLength: 6,
     },
+
+    socialProviders: {
+      google: {
+        clientId: process.env.GOOGLE_CLIENT_ID,
+        clientSecret: process.env.GOOGLE_CLIENT_SECRET,
+      },
+    },
   });
 
   // Better Auth route (must come before express.json)
@@ -244,80 +251,68 @@ try {
           }
         }
 
-// Subscription updated (including scheduled cancellation)
-if (event.type === "customer.subscription.updated") {
-  const subscription = event.data.object;
-  const vendorId = subscription.metadata?.vendorId;
+        // Subscription updated (including scheduled cancellation)
+        if (event.type === "customer.subscription.updated") {
+          const subscription = event.data.object;
+          const vendorId = subscription.metadata?.vendorId;
 
-  if (ObjectId.isValid(vendorId)) {
-    const periodEnd =
-      subscription.items?.data?.[0]?.current_period_end ||
-      subscription.current_period_end;
+          if (ObjectId.isValid(vendorId)) {
+            const periodEnd =
+              subscription.items?.data?.[0]?.current_period_end ||
+              subscription.current_period_end;
 
-    const updateData = {
-      subscriptionStatus: subscription.status,
-      subscriptionUpdatedAt: new Date(),
-      subscriptionCancelAtPeriodEnd:
-        subscription.cancel_at_period_end,
-    };
+            const updateData = {
+              subscriptionStatus: subscription.status,
+              subscriptionUpdatedAt: new Date(),
+              subscriptionCancelAtPeriodEnd: subscription.cancel_at_period_end,
+            };
 
-    if (periodEnd) {
-      updateData.subscriptionExpiresAt = new Date(
-        periodEnd * 1000
-      );
-    }
+            if (periodEnd) {
+              updateData.subscriptionExpiresAt = new Date(periodEnd * 1000);
+            }
 
-    await usersCollection.updateOne(
-      {
-        _id: new ObjectId(vendorId),
-        stripeSubscriptionId: subscription.id,
-      },
-      {
-        $set: updateData,
-      }
-    );
+            await usersCollection.updateOne(
+              {
+                _id: new ObjectId(vendorId),
+                stripeSubscriptionId: subscription.id,
+              },
+              {
+                $set: updateData,
+              },
+            );
 
-    console.log(
-      "Subscription updated:",
-      vendorId,
-      subscription.status
-    );
-  }
-}
+            console.log("Subscription updated:", vendorId, subscription.status);
+          }
+        }
 
-        
-// Subscription actually expired or cancelled
-if (event.type === "customer.subscription.deleted") {
-  const subscription = event.data.object;
-  const vendorId = subscription.metadata?.vendorId;
+        // Subscription actually expired or cancelled
+        if (event.type === "customer.subscription.deleted") {
+          const subscription = event.data.object;
+          const vendorId = subscription.metadata?.vendorId;
 
-  if (ObjectId.isValid(vendorId)) {
-    await usersCollection.updateOne(
-      {
-        _id: new ObjectId(vendorId),
-        stripeSubscriptionId: subscription.id,
-      },
-      {
-        $set: {
-          subscriptionPlan: "basic",
-          subscriptionStatus: "canceled",
-          subscriptionCancelAtPeriodEnd: false,
-          subscriptionUpdatedAt: new Date(),
-        },
-        $unset: {
-          subscriptionExpiresAt: "",
-          stripeSubscriptionId: "",
-        },
-      }
-    );
+          if (ObjectId.isValid(vendorId)) {
+            await usersCollection.updateOne(
+              {
+                _id: new ObjectId(vendorId),
+                stripeSubscriptionId: subscription.id,
+              },
+              {
+                $set: {
+                  subscriptionPlan: "basic",
+                  subscriptionStatus: "canceled",
+                  subscriptionCancelAtPeriodEnd: false,
+                  subscriptionUpdatedAt: new Date(),
+                },
+                $unset: {
+                  subscriptionExpiresAt: "",
+                  stripeSubscriptionId: "",
+                },
+              },
+            );
 
-    console.log(
-      "Vendor downgraded to Basic:",
-      vendorId
-    );
-  }
-}
-
+            console.log("Vendor downgraded to Basic:", vendorId);
+          }
+        }
 
         return res.status(200).send({ received: true });
       } catch (error) {
@@ -612,103 +607,102 @@ if (event.type === "customer.subscription.deleted") {
   });
 
   // Add a new wedding service
-  
-// Add a new wedding service  (change)
-app.post("/services", verifyUser, verifyVendor, async (req, res) => {
-  try {
-    const { serviceName, category, description, price, location, images } =
-      req.body;
 
-    if (
-      !serviceName ||
-      !category ||
-      !description ||
-      !price ||
-      !location ||
-      !images
-    ) {
-      return res.status(400).send({
-        success: false,
-        message: "Please provide all required fields.",
-      });
-    }
+  // Add a new wedding service  (change)
+  app.post("/services", verifyUser, verifyVendor, async (req, res) => {
+    try {
+      const { serviceName, category, description, price, location, images } =
+        req.body;
 
-    if (Number(price) <= 0 || !Number.isFinite(Number(price))) {
-      return res.status(400).send({
-        success: false,
-        message: "Please provide a valid price.",
-      });
-    }
-
-    // Get vendor subscription information
-    const vendor = await usersCollection.findOne({
-      _id: new ObjectId(req.user.id),
-      role: "vendor",
-    });
-
-    if (!vendor) {
-      return res.status(404).send({
-        success: false,
-        message: "Vendor not found.",
-      });
-    }
-
-    // Check whether Premium subscription is valid
-    const isPremium =
-      vendor.subscriptionPlan === "premium" &&
-      ["active", "trialing"].includes(vendor.subscriptionStatus) &&
-      vendor.subscriptionExpiresAt &&
-      new Date(vendor.subscriptionExpiresAt) > new Date();
-
-    // Check Basic plan service limit
-    if (!isPremium) {
-      const activeServices = await servicesCollection.countDocuments({
-        vendorId: req.user.id,
-        status: "approved",
-        isActive: true,
-      });
-
-      if (activeServices >= 3) {
-        return res.status(403).send({
+      if (
+        !serviceName ||
+        !category ||
+        !description ||
+        !price ||
+        !location ||
+        !images
+      ) {
+        return res.status(400).send({
           success: false,
-          message:
-            "Basic plan allows only 3 active services. Upgrade to Premium for unlimited services.",
+          message: "Please provide all required fields.",
         });
       }
+
+      if (Number(price) <= 0 || !Number.isFinite(Number(price))) {
+        return res.status(400).send({
+          success: false,
+          message: "Please provide a valid price.",
+        });
+      }
+
+      // Get vendor subscription information
+      const vendor = await usersCollection.findOne({
+        _id: new ObjectId(req.user.id),
+        role: "vendor",
+      });
+
+      if (!vendor) {
+        return res.status(404).send({
+          success: false,
+          message: "Vendor not found.",
+        });
+      }
+
+      // Check whether Premium subscription is valid
+      const isPremium =
+        vendor.subscriptionPlan === "premium" &&
+        ["active", "trialing"].includes(vendor.subscriptionStatus) &&
+        vendor.subscriptionExpiresAt &&
+        new Date(vendor.subscriptionExpiresAt) > new Date();
+
+      // Check Basic plan service limit
+      if (!isPremium) {
+        const activeServices = await servicesCollection.countDocuments({
+          vendorId: req.user.id,
+          status: "approved",
+          isActive: true,
+        });
+
+        if (activeServices >= 3) {
+          return res.status(403).send({
+            success: false,
+            message:
+              "Basic plan allows only 3 active services. Upgrade to Premium for unlimited services.",
+          });
+        }
+      }
+
+      // Create new service
+      const newService = {
+        vendorId: req.user.id,
+        vendorName: req.user.name,
+        serviceName,
+        category,
+        description,
+        price: Number(price),
+        location,
+        images: [images],
+        status: "pending",
+        isActive: true,
+        createdAt: new Date(),
+      };
+
+      const result = await servicesCollection.insertOne(newService);
+
+      res.status(201).send({
+        success: true,
+        message: "Service submitted for admin approval!",
+        insertedId: result.insertedId,
+      });
+    } catch (error) {
+      console.error("Failed to add service:", error);
+
+      res.status(500).send({
+        success: false,
+        message: "Failed to add service.",
+      });
     }
-
-    // Create new service
-    const newService = {
-      vendorId: req.user.id,
-      vendorName: req.user.name,
-      serviceName,
-      category,
-      description,
-      price: Number(price),
-      location,
-      images: [images],
-      status: "pending",
-      isActive: true,
-      createdAt: new Date(),
-    };
-
-    const result = await servicesCollection.insertOne(newService);
-
-    res.status(201).send({
-      success: true,
-      message: "Service submitted for admin approval!",
-      insertedId: result.insertedId,
-    });
-  } catch (error) {
-    console.error("Failed to add service:", error);
-
-    res.status(500).send({
-      success: false,
-      message: "Failed to add service.",
-    });
-  }
-});
-
+  });
 
   // Get services belonging to the logged-in vendor
   app.get("/vendor/services", verifyUser, verifyVendor, async (req, res) => {
@@ -875,108 +869,104 @@ app.post("/services", verifyUser, verifyVendor, async (req, res) => {
     },
   );
 
+  app.post(
+    "/cancel-subscription",
+    verifyUser,
+    verifyVendor,
+    async (req, res) => {
+      try {
+        const vendorId = req.user.id;
 
-app.post(
-  "/cancel-subscription",
-  verifyUser,
-  verifyVendor,
-  async (req, res) => {
-    try {
-      const vendorId = req.user.id;
+        if (!ObjectId.isValid(vendorId)) {
+          return res.status(400).send({
+            success: false,
+            message: "Invalid vendor ID.",
+          });
+        }
 
-      if (!ObjectId.isValid(vendorId)) {
-        return res.status(400).send({
-          success: false,
-          message: "Invalid vendor ID.",
+        // Find vendor
+        const vendor = await usersCollection.findOne({
+          _id: new ObjectId(vendorId),
+          role: "vendor",
         });
-      }
 
-      // Find vendor
-      const vendor = await usersCollection.findOne({
-        _id: new ObjectId(vendorId),
-        role: "vendor",
-      });
+        if (!vendor || !vendor.stripeSubscriptionId) {
+          return res.status(404).send({
+            success: false,
+            message: "No active subscription found.",
+          });
+        }
 
-      if (!vendor || !vendor.stripeSubscriptionId) {
-        return res.status(404).send({
-          success: false,
-          message: "No active subscription found.",
-        });
-      }
+        // Retrieve Stripe subscription
+        const subscription = await stripe.subscriptions.retrieve(
+          vendor.stripeSubscriptionId,
+        );
 
-      // Retrieve Stripe subscription
-      const subscription = await stripe.subscriptions.retrieve(
-        vendor.stripeSubscriptionId
-      );
+        // Verify subscription ownership
+        if (subscription.metadata?.vendorId !== vendorId) {
+          return res.status(403).send({
+            success: false,
+            message: "Subscription ownership verification failed.",
+          });
+        }
 
-      // Verify subscription ownership
-      if (subscription.metadata?.vendorId !== vendorId) {
-        return res.status(403).send({
-          success: false,
-          message: "Subscription ownership verification failed.",
-        });
-      }
+        if (!["active", "trialing"].includes(subscription.status)) {
+          return res.status(400).send({
+            success: false,
+            message: "Subscription is not active.",
+          });
+        }
 
-      if (!["active", "trialing"].includes(subscription.status)) {
-        return res.status(400).send({
-          success: false,
-          message: "Subscription is not active.",
-        });
-      }
+        if (subscription.cancel_at_period_end) {
+          return res.status(200).send({
+            success: true,
+            message: "Cancellation is already scheduled.",
+          });
+        }
 
-      if (subscription.cancel_at_period_end) {
+        // Schedule cancellation at billing period end
+        const updatedSubscription = await stripe.subscriptions.update(
+          subscription.id,
+          {
+            cancel_at_period_end: true,
+          },
+        );
+
+        const periodEnd =
+          updatedSubscription.items?.data?.[0]?.current_period_end ||
+          updatedSubscription.current_period_end;
+
+        await usersCollection.updateOne(
+          {
+            _id: new ObjectId(vendorId),
+            stripeSubscriptionId: subscription.id,
+          },
+          {
+            $set: {
+              subscriptionCancelAtPeriodEnd: true,
+              subscriptionExpiresAt: periodEnd
+                ? new Date(periodEnd * 1000)
+                : vendor.subscriptionExpiresAt,
+              subscriptionUpdatedAt: new Date(),
+            },
+          },
+        );
+
         return res.status(200).send({
           success: true,
-          message: "Cancellation is already scheduled.",
+          message: "Subscription cancellation scheduled successfully.",
+          expiresAt: periodEnd ? new Date(periodEnd * 1000) : null,
+        });
+      } catch (error) {
+        console.error("Subscription cancellation error:", error);
+
+        return res.status(500).send({
+          success: false,
+          message: "Unable to cancel subscription.",
         });
       }
-
-      // Schedule cancellation at billing period end
-      const updatedSubscription = await stripe.subscriptions.update(
-        subscription.id,
-        {
-          cancel_at_period_end: true,
-        }
-      );
-
-      const periodEnd =
-        updatedSubscription.items?.data?.[0]?.current_period_end ||
-        updatedSubscription.current_period_end;
-
-      await usersCollection.updateOne(
-        {
-          _id: new ObjectId(vendorId),
-          stripeSubscriptionId: subscription.id,
-        },
-        {
-          $set: {
-            subscriptionCancelAtPeriodEnd: true,
-            subscriptionExpiresAt: periodEnd
-              ? new Date(periodEnd * 1000)
-              : vendor.subscriptionExpiresAt,
-            subscriptionUpdatedAt: new Date(),
-          },
-        }
-      );
-
-      return res.status(200).send({
-        success: true,
-        message: "Subscription cancellation scheduled successfully.",
-        expiresAt: periodEnd
-          ? new Date(periodEnd * 1000)
-          : null,
-      });
-    } catch (error) {
-      console.error("Subscription cancellation error:", error);
-
-      return res.status(500).send({
-        success: false,
-        message: "Unable to cancel subscription.",
-      });
-    }
-  }
-);
-
+    },
+  );
 
   // Update Vendor Profile
   app.patch("/vendor/profile", verifyUser, verifyVendor, async (req, res) => {
@@ -1321,7 +1311,7 @@ app.post(
   );
 
   // Approve or reject a service
-  
+
   // Approve or reject a service (change)
   app.patch(
     "/admin/services/:id/status",
@@ -1433,7 +1423,6 @@ app.post(
       }
     },
   );
-
 
   // Delete a service (Admin only)
   app.delete(
