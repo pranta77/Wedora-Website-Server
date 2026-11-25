@@ -7,6 +7,8 @@ import { betterAuth } from "better-auth";
 import { mongodbAdapter } from "@better-auth/mongo-adapter";
 import { fromNodeHeaders, toNodeHandler } from "better-auth/node";
 import Stripe from "stripe";
+import { jwt } from "better-auth/plugins";
+import { jwtVerify, createRemoteJWKSet } from "jose";
 
 const app = express();
 app.set("trust proxy", 1);
@@ -135,6 +137,7 @@ try {
         clientSecret: process.env.GOOGLE_CLIENT_SECRET,
       },
     },
+    plugins:[jwt()]
   });
 
   // Better Auth route (must come before express.json)
@@ -328,6 +331,96 @@ try {
 
   // Middleware for other API routes
   app.use(express.json());
+
+
+
+// Better Auth public JWT verification keys
+const JWKS = createRemoteJWKSet(
+  new URL("/api/auth/jwks", process.env.BETTER_AUTH_URL)
+);
+
+// Verify JWT token
+const verifyToken = async (req, res, next) => {
+  const authHeader = req.headers.authorization;
+
+  if (!authHeader?.startsWith("Bearer ")) {
+    return res.status(401).send({
+      success: false,
+      message: "Unauthorized!",
+    });
+  }
+
+  const token = authHeader.split(" ")[1];
+
+  if (!token) {
+    return res.status(401).send({
+      success: false,
+      message: "Unauthorized!",
+    });
+  }
+
+  let payload;
+
+  try {
+    const result = await jwtVerify(token, JWKS, {
+      issuer: process.env.BETTER_AUTH_URL,
+      audience: process.env.BETTER_AUTH_URL,
+    });
+
+    payload = result.payload;
+  } catch (error) {
+    return res.status(401).send({
+      success: false,
+      message: "Invalid or expired token!",
+    });
+  }
+
+  if (!payload.sub || !ObjectId.isValid(payload.sub)) {
+    return res.status(401).send({
+      success: false,
+      message: "Invalid user token!",
+    });
+  }
+
+  try {
+    // Get trusted user information from MongoDB
+    const user = await usersCollection.findOne({
+      _id: new ObjectId(payload.sub),
+    });
+
+    if (!user) {
+      return res.status(401).send({
+        success: false,
+        message: "User not found!",
+      });
+    }
+
+    if (user.isBlocked) {
+      return res.status(403).send({
+        success: false,
+        message: "Your account has been blocked.",
+      });
+    }
+
+    req.user = {
+      id: user._id.toString(),
+      name: user.name,
+      email: user.email,
+      role: user.role,
+    };
+
+    next();
+  } catch (error) {
+    console.error("JWT authentication error:", error);
+
+    return res.status(500).send({
+      success: false,
+      message: "Authentication service error.",
+    });
+  }
+};
+
+
 
   // Verify logged-in user
   const verifyUser = async (req, res, next) => {
@@ -606,10 +699,11 @@ try {
     }
   });
 
-  // Add a new wedding service
 
-  // Add a new wedding service  (change)
-  app.post("/services", verifyUser, verifyVendor, async (req, res) => {
+  // Add a new wedding service  
+  app.post("/services", /* verifyUser */ verifyToken, verifyVendor, async (req, res) => {
+    console.log("header on ther ",req.headers);
+    
     try {
       const { serviceName, category, description, price, location, images } =
         req.body;
@@ -1018,7 +1112,8 @@ try {
   // Update Vendor Service
   app.patch(
     "/vendor/services/:id",
-    verifyUser,
+   /*  verifyUser, */
+   verifyToken,
     verifyVendor,
     async (req, res) => {
       try {
@@ -1510,7 +1605,7 @@ try {
   );
 
   // Get all approved and active services
-  app.get("/services", async (req, res) => {
+  app.get("/services",  async (req, res) => {
     try {
       const services = await servicesCollection
         .find({
