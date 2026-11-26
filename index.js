@@ -21,6 +21,7 @@ const isProduction =
   process.env.BETTER_AUTH_URL?.startsWith("https://") ||
   Boolean(process.env.VERCEL) ||
   Boolean(process.env.RENDER);
+// const isProduction = true;
 
 const CLIENT_URL =
   process.env.CLIENT_URL ||
@@ -65,12 +66,13 @@ try {
     trustedOrigins: allowedOrigins,
 
     advanced: {
-      useSecureCookies: isProduction,
+      // useSecureCookies: isProduction,
       defaultCookieAttributes: {
         sameSite: isProduction ? "none" : "lax",
+        // sameSite: "none",
         secure: isProduction,
         httpOnly: true,
-        partitioned: isProduction,
+        // partitioned: isProduction,
       },
     },
 
@@ -137,7 +139,7 @@ try {
         clientSecret: process.env.GOOGLE_CLIENT_SECRET,
       },
     },
-    plugins:[jwt()]
+    plugins: [jwt()],
   });
 
   // Better Auth route (must come before express.json)
@@ -332,95 +334,91 @@ try {
   // Middleware for other API routes
   app.use(express.json());
 
+  // Better Auth public JWT verification keys
+  const JWKS = createRemoteJWKSet(
+    new URL("/api/auth/jwks", process.env.BETTER_AUTH_URL),
+  );
 
+  // Verify JWT token
+  const verifyToken = async (req, res, next) => {
+    const authHeader = req.headers.authorization;
 
-// Better Auth public JWT verification keys
-const JWKS = createRemoteJWKSet(
-  new URL("/api/auth/jwks", process.env.BETTER_AUTH_URL)
-);
-
-// Verify JWT token
-const verifyToken = async (req, res, next) => {
-  const authHeader = req.headers.authorization;
-
-  if (!authHeader?.startsWith("Bearer ")) {
-    return res.status(401).send({
-      success: false,
-      message: "Unauthorized!",
-    });
-  }
-
-  const token = authHeader.split(" ")[1];
-
-  if (!token) {
-    return res.status(401).send({
-      success: false,
-      message: "Unauthorized!",
-    });
-  }
-
-  let payload;
-
-  try {
-    const result = await jwtVerify(token, JWKS, {
-      issuer: process.env.BETTER_AUTH_URL,
-      audience: process.env.BETTER_AUTH_URL,
-    });
-
-    payload = result.payload;
-  } catch (error) {
-    return res.status(401).send({
-      success: false,
-      message: "Invalid or expired token!",
-    });
-  }
-
-  if (!payload.sub || !ObjectId.isValid(payload.sub)) {
-    return res.status(401).send({
-      success: false,
-      message: "Invalid user token!",
-    });
-  }
-
-  try {
-    // Get trusted user information from MongoDB
-    const user = await usersCollection.findOne({
-      _id: new ObjectId(payload.sub),
-    });
-
-    if (!user) {
+    if (!authHeader?.startsWith("Bearer ")) {
       return res.status(401).send({
         success: false,
-        message: "User not found!",
+        message: "Unauthorized!",
       });
     }
 
-    if (user.isBlocked) {
-      return res.status(403).send({
+    const token = authHeader.split(" ")[1];
+
+    if (!token) {
+      return res.status(401).send({
         success: false,
-        message: "Your account has been blocked.",
+        message: "Unauthorized!",
       });
     }
 
-    req.user = {
-      id: user._id.toString(),
-      name: user.name,
-      email: user.email,
-      role: user.role,
-    };
+    let payload;
 
-    next();
-  } catch (error) {
-    console.error("JWT authentication error:", error);
+    try {
+      const result = await jwtVerify(token, JWKS, {
+        issuer: process.env.BETTER_AUTH_URL,
+        audience: process.env.BETTER_AUTH_URL,
+      });
 
-    return res.status(500).send({
-      success: false,
-      message: "Authentication service error.",
-    });
-  }
-};
+      payload = result.payload;
+    } catch (error) {
+      return res.status(401).send({
+        success: false,
+        message: "Invalid or expired token!",
+      });
+    }
 
+    if (!payload.sub || !ObjectId.isValid(payload.sub)) {
+      return res.status(401).send({
+        success: false,
+        message: "Invalid user token!",
+      });
+    }
 
+    try {
+      // Get trusted user information from MongoDB
+      const user = await usersCollection.findOne({
+        _id: new ObjectId(payload.sub),
+      });
+
+      if (!user) {
+        return res.status(401).send({
+          success: false,
+          message: "User not found!",
+        });
+      }
+
+      if (user.isBlocked) {
+        return res.status(403).send({
+          success: false,
+          message: "Your account has been blocked.",
+        });
+      }
+
+      req.user = {
+        id: user._id.toString(),
+        name: user.name,
+        email: user.email,
+        role: user.role,
+      };
+
+      next();
+    } catch (error) {
+      console.error("JWT authentication error:", error);
+
+      return res.status(500).send({
+        success: false,
+        message: "Authentication service error.",
+      });
+    }
+  };
 
   // Verify logged-in user
   const verifyUser = async (req, res, next) => {
@@ -560,6 +558,7 @@ const verifyToken = async (req, res, next) => {
       const newBooking = {
         serviceId: service._id,
         serviceName: service.serviceName,
+        serviceImages: service.images || [],
         vendorId: service.vendorId,
         vendorName: service.vendorName,
         customerId: req.user.id,
@@ -699,104 +698,108 @@ const verifyToken = async (req, res, next) => {
     }
   });
 
+  // Add a new wedding service
+  app.post(
+    "/services",
+    /* verifyUser */ verifyToken,
+    verifyVendor,
+    async (req, res) => {
+      console.log("header on ther ", req.headers);
 
-  // Add a new wedding service  
-  app.post("/services", /* verifyUser */ verifyToken, verifyVendor, async (req, res) => {
-    console.log("header on ther ",req.headers);
-    
-    try {
-      const { serviceName, category, description, price, location, images } =
-        req.body;
+      try {
+        const { serviceName, category, description, price, location, images } =
+          req.body;
 
-      if (
-        !serviceName ||
-        !category ||
-        !description ||
-        !price ||
-        !location ||
-        !images
-      ) {
-        return res.status(400).send({
-          success: false,
-          message: "Please provide all required fields.",
-        });
-      }
-
-      if (Number(price) <= 0 || !Number.isFinite(Number(price))) {
-        return res.status(400).send({
-          success: false,
-          message: "Please provide a valid price.",
-        });
-      }
-
-      // Get vendor subscription information
-      const vendor = await usersCollection.findOne({
-        _id: new ObjectId(req.user.id),
-        role: "vendor",
-      });
-
-      if (!vendor) {
-        return res.status(404).send({
-          success: false,
-          message: "Vendor not found.",
-        });
-      }
-
-      // Check whether Premium subscription is valid
-      const isPremium =
-        vendor.subscriptionPlan === "premium" &&
-        ["active", "trialing"].includes(vendor.subscriptionStatus) &&
-        vendor.subscriptionExpiresAt &&
-        new Date(vendor.subscriptionExpiresAt) > new Date();
-
-      // Check Basic plan service limit
-      if (!isPremium) {
-        const activeServices = await servicesCollection.countDocuments({
-          vendorId: req.user.id,
-          status: "approved",
-          isActive: true,
-        });
-
-        if (activeServices >= 3) {
-          return res.status(403).send({
+        if (
+          !serviceName ||
+          !category ||
+          !description ||
+          !price ||
+          !location ||
+          !images
+        ) {
+          return res.status(400).send({
             success: false,
-            message:
-              "Basic plan allows only 3 active services. Upgrade to Premium for unlimited services.",
+            message: "Please provide all required fields.",
           });
         }
+
+        if (Number(price) <= 0 || !Number.isFinite(Number(price))) {
+          return res.status(400).send({
+            success: false,
+            message: "Please provide a valid price.",
+          });
+        }
+
+        // Get vendor subscription information
+        const vendor = await usersCollection.findOne({
+          _id: new ObjectId(req.user.id),
+          role: "vendor",
+        });
+
+        if (!vendor) {
+          return res.status(404).send({
+            success: false,
+            message: "Vendor not found.",
+          });
+        }
+
+        // Check whether Premium subscription is valid
+        const isPremium =
+          vendor.subscriptionPlan === "premium" &&
+          ["active", "trialing"].includes(vendor.subscriptionStatus) &&
+          vendor.subscriptionExpiresAt &&
+          new Date(vendor.subscriptionExpiresAt) > new Date();
+
+        // Check Basic plan service limit
+        if (!isPremium) {
+          const activeServices = await servicesCollection.countDocuments({
+            vendorId: req.user.id,
+            status: "approved",
+            isActive: true,
+          });
+
+          if (activeServices >= 3) {
+            return res.status(403).send({
+              success: false,
+              message:
+                "Basic plan allows only 3 active services. Upgrade to Premium for unlimited services.",
+            });
+          }
+        }
+
+        // Create new service
+        const newService = {
+          vendorId: req.user.id,
+          vendorName: req.user.name,
+          serviceName,
+          category,
+          description,
+          price: Number(price),
+          location,
+          images: [images],
+          status: "pending",
+          isActive: true,
+          createdAt: new Date(),
+        };
+
+        const result = await servicesCollection.insertOne(newService);
+
+        res.status(201).send({
+          success: true,
+          message: "Service submitted for admin approval!",
+          insertedId: result.insertedId,
+        });
+      } catch (error) {
+        console.error("Failed to add service:", error);
+
+        res.status(500).send({
+          success: false,
+          message: "Failed to add service.",
+        });
       }
-
-      // Create new service
-      const newService = {
-        vendorId: req.user.id,
-        vendorName: req.user.name,
-        serviceName,
-        category,
-        description,
-        price: Number(price),
-        location,
-        images: [images],
-        status: "pending",
-        isActive: true,
-        createdAt: new Date(),
-      };
-
-      const result = await servicesCollection.insertOne(newService);
-
-      res.status(201).send({
-        success: true,
-        message: "Service submitted for admin approval!",
-        insertedId: result.insertedId,
-      });
-    } catch (error) {
-      console.error("Failed to add service:", error);
-
-      res.status(500).send({
-        success: false,
-        message: "Failed to add service.",
-      });
-    }
-  });
+    },
+  );
 
   // Get services belonging to the logged-in vendor
   app.get("/vendor/services", verifyUser, verifyVendor, async (req, res) => {
@@ -1112,8 +1115,8 @@ const verifyToken = async (req, res, next) => {
   // Update Vendor Service
   app.patch(
     "/vendor/services/:id",
-   /*  verifyUser, */
-   verifyToken,
+    /*  verifyUser, */
+    verifyToken,
     verifyVendor,
     async (req, res) => {
       try {
@@ -1605,7 +1608,7 @@ const verifyToken = async (req, res, next) => {
   );
 
   // Get all approved and active services
-  app.get("/services",  async (req, res) => {
+  app.get("/services", async (req, res) => {
     try {
       const services = await servicesCollection
         .find({
