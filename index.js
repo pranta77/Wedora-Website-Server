@@ -1408,8 +1408,6 @@ try {
     },
   );
 
-  // Approve or reject a service
-
   // Approve or reject a service (change)
   app.patch(
     "/admin/services/:id/status",
@@ -1563,6 +1561,69 @@ try {
       }
     },
   );
+
+
+  // Activate or deactivate an approved service (Admin only)
+  app.patch(
+    "/admin/services/:id/active",
+    verifyUser,
+    verifyAdmin,
+    async (req, res) => {
+      try {
+        const { id } = req.params;
+        const { isActive } = req.body;
+
+        if (!ObjectId.isValid(id)) {
+          return res.status(400).send({
+            success: false,
+            message: "Invalid service ID.",
+          });
+        }
+
+        if (typeof isActive !== "boolean") {
+          return res.status(400).send({
+            success: false,
+            message: "Invalid service status.",
+          });
+        }
+
+        const result = await servicesCollection.updateOne(
+          {
+            _id: new ObjectId(id),
+            status: "approved",
+          },
+          {
+            $set: {
+              isActive,
+              updatedAt: new Date(),
+            },
+          },
+        );
+
+        if (result.matchedCount === 0) {
+          return res.status(404).send({
+            success: false,
+            message: "Approved service not found.",
+          });
+        }
+
+        res.status(200).send({
+          success: true,
+          message: isActive
+            ? "Service activated successfully."
+            : "Service deactivated successfully.",
+        });
+      } catch (error) {
+        console.error("Failed to update service status:", error);
+
+        res.status(500).send({
+          success: false,
+          message: "Failed to update service status.",
+        });
+      }
+    },
+  );
+
 
   // Delete Vendor Service
   app.delete(
